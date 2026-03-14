@@ -30,4 +30,14 @@ pub fn spawn_lcu_listener(tx: Arc<broadcast::Sender<String>>) {
     });
 }
 
+pub async fn get_summoner_data() -> Option<String> {
+    let client = irelia::requests::new();
+    let lcu_client = irelia::rest::LcuClient::connect_with_request_client(&client).ok()?;
 
+    let summoner: serde_json::Value = lcu_client
+        .get("/lol-summoner/v1/current-summoner")
+        .await
+        .ok()?;
+
+    serde_json::to_string(&summoner).ok()
+}

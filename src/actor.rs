@@ -26,6 +26,9 @@ impl Actor for MyWs {
                 if let Some(data) = get_initial_rank().await {
                     addr.do_send(InitialData(data));
                 }
+                if let Some(data) = crate::lcu::get_summoner_data().await {
+                    addr.do_send(InitialData(data));
+                }
             });
         });
     }

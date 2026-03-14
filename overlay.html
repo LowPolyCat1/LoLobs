@@ -8,7 +8,7 @@
             background: transparent;
             margin: 0;
             padding: 30px;
-            font-family: 'Segoe UI', Roboto, Helvetica, Arial, sans-serif;
+            font-family: 'Segoe UI', Roboto, sans-serif;
             color: white;
             overflow: hidden;
         }
@@ -19,13 +19,15 @@
             background: rgba(6, 11, 19, 0.95);
             border: 2px solid #c8aa6e;
             border-radius: 12px;
-            padding: 5px 35px 5px 5px;
-            /* Weniger Padding oben/unten */
+            /* Added padding to ensure text has space */
+            padding: 5px 45px 5px 0px;
             width: fit-content;
+            /* Prevents the card from being squished by OBS bounds */
+            min-width: 400px;
             opacity: 0;
             transition: opacity 0.8s ease, transform 0.5s ease;
             transform: translateY(10px);
-            box-shadow: 0 10px 30px rgba(0, 0, 0, 0.5);
+            box-shadow: 0 10px 40px rgba(0, 0, 0, 0.6);
         }
 
         #rank-card.visible {
@@ -33,64 +35,68 @@
             transform: translateY(0);
         }
 
-        /* Container, der das Icon "beschneidet" */
         .icon-container {
-            width: 120px;
-            /* Kleinerer Container zum Croppen */
-            height: 120px;
+            width: 180px;
+            height: 180px;
             display: flex;
             align-items: center;
             justify-content: center;
             overflow: hidden;
             flex-shrink: 0;
-            margin-right: 15px;
+            margin-right: -10px;
         }
 
         #rank-icon {
-            width: 280px;
-            /* Bild massiv vergrößert */
-            height: 280px;
+            width: 320px;
+            height: 320px;
             object-fit: contain;
-            /* Zoomt tief in das Asset hinein, um die Ränder zu ignorieren */
-            transform: scale(1.8);
-            filter: drop-shadow(0 0 15px rgba(0, 0, 0, 0.7));
+            transform: scale(1.6);
+            filter: drop-shadow(0 0 20px rgba(0, 0, 0, 0.8));
+            flex-shrink: 0;
         }
 
         .text-group {
             display: flex;
             flex-direction: column;
             justify-content: center;
+            z-index: 2;
+            /* Ensure text doesn't shrink */
+            flex-grow: 1;
         }
 
-        /* Tier und Division in einer Zeile */
-        .rank-info {
-            display: flex;
-            gap: 10px;
-            align-items: baseline;
+        .summoner-name {
+            font-size: 1.2rem;
+            font-weight: 600;
+            color: #f0e6d2;
+            margin-bottom: -2px;
+            text-shadow: 1px 1px 3px rgba(0, 0, 0, 0.8);
+            white-space: nowrap;
+        }
+
+        .summoner-tag {
+            color: #7e7e7e;
+            font-weight: 400;
         }
 
         .tier-text {
-            font-size: 2.5rem;
-            font-weight: 800;
+            font-size: 2.4rem;
+            font-weight: 900;
             text-transform: uppercase;
             color: #f0e6d2;
-            letter-spacing: 2px;
             line-height: 1;
-            text-shadow: 2px 2px 4px rgba(0, 0, 0, 0.5);
-        }
-
-        .division-text {
-            font-size: 2rem;
-            font-weight: 600;
-            color: #c8aa6e;
+            margin-bottom: 2px;
+            letter-spacing: 1px;
+            text-shadow: 2px 2px 5px rgba(0, 0, 0, 0.9);
+            /* CRITICAL FIX: Prevent division from wrapping to new line */
+            white-space: nowrap;
         }
 
         .lp-text {
-            color: #a09b8c;
-            font-size: 1.3rem;
-            font-weight: 600;
-            margin-top: 2px;
-            text-transform: uppercase;
+            color: #c8aa6e;
+            font-size: 1.6rem;
+            font-weight: 700;
+            text-shadow: 1px 1px 3px rgba(0, 0, 0, 0.8);
+            white-space: nowrap;
         }
     </style>
 </head>
@@ -98,13 +104,13 @@
 <body>
     <div id="rank-card">
         <div class="icon-container">
-            <img id="rank-icon" src="">
+            <img id="rank-icon" src="" alt="">
         </div>
         <div class="text-group">
-            <div class="rank-info">
-                <span id="tier" class="tier-text">LOADING</span>
-                <span id="division" class="division-text"></span>
+            <div class="summoner-name">
+                <span id="game-name">Loading</span><span id="tag-line" class="summoner-tag">#...</span>
             </div>
+            <div id="tier" class="tier-text">---</div>
             <div id="lp" class="lp-text">-- LP</div>
         </div>
     </div>
@@ -115,27 +121,32 @@
         socket.onmessage = (event) => {
             try {
                 const data = JSON.parse(event.data);
-                const soloQ = data.queues?.find(q => q.queueType === "RANKED_SOLO_5x5");
 
+                if (data.gameName) {
+                    document.getElementById('game-name').innerText = data.gameName;
+                    document.getElementById('tag-line').innerText = `#${data.tagLine}`;
+                }
+
+                const soloQ = data.queues?.find(q => q.queueType === "RANKED_SOLO_5x5");
                 if (soloQ) {
                     const tierName = soloQ.tier;
-                    const divName = soloQ.division !== "NA" ? soloQ.division : "";
+                    const division = (soloQ.division && soloQ.division !== "NA") ? soloQ.division : "";
 
-                    document.getElementById('tier').innerText = tierName;
-                    document.getElementById('division').innerText = divName;
+                    document.getElementById('tier').innerText = `${tierName} ${division}`.trim();
                     document.getElementById('lp').innerText = `${soloQ.leaguePoints} LP`;
 
-                    const iconUrl = `https://raw.communitydragon.org/latest/plugins/rcp-fe-lol-static-assets/global/default/images/ranked-emblem/emblem-${tierName.toLowerCase()}.png`;
+                    const tier = tierName.toLowerCase();
                     const iconImg = document.getElementById('rank-icon');
+                    const newSrc = `https://raw.communitydragon.org/latest/plugins/rcp-fe-lol-static-assets/global/default/images/ranked-emblem/emblem-${tier}.png`;
 
-                    if (iconImg.src !== iconUrl) {
-                        iconImg.src = iconUrl;
+                    if (iconImg.src !== newSrc) {
+                        iconImg.src = newSrc;
                     }
 
                     document.getElementById('rank-card').classList.add('visible');
                 }
             } catch (e) {
-                console.error("Parsing error:", e);
+                console.error("Overlay Error:", e);
             }
         };
     </script>
