@@ -2,128 +2,26 @@
 <html>
 
 <head>
-    <meta charset="UTF-8">
-    <style>
-        body {
-            background: transparent;
-            margin: 0;
-            padding: 10px;
-            font-family: 'Segoe UI', Roboto, Helvetica, Arial, sans-serif;
-            color: white;
-            overflow: hidden;
-        }
-
-        #stats-card {
-            display: flex;
-            align-items: center;
-            background: rgba(6, 11, 19, 0.9);
-            border-left: 4px solid #c8aa6e;
-            padding: 10px 20px;
-            width: fit-content;
-            border-radius: 4px;
-            opacity: 0;
-            transition: opacity 0.5s ease;
-            box-shadow: 0 4px 15px rgba(0, 0, 0, 0.5);
-        }
-
-        #stats-card.visible {
-            opacity: 1;
-        }
-
-        .stat-section {
-            display: flex;
-            flex-direction: column;
-            margin-right: 25px;
-        }
-
-        .stat-section:last-child {
-            margin-right: 0;
-        }
-
-        .label {
-            font-size: 0.75rem;
-            text-transform: uppercase;
-            color: #a09b8c;
-            letter-spacing: 1px;
-            margin-bottom: 2px;
-        }
-
-        .value {
-            font-size: 1.4rem;
-            font-weight: 800;
-            line-height: 1;
-        }
-
-        #wr-value {
-            color: #f0e6d2;
-        }
-
-        .win {
-            color: #1ef32d;
-        }
-
-        .loss {
-            color: #ff4e50;
-        }
-
-        .slash {
-            color: #444;
-            margin: 0 2px;
-        }
-    </style>
+    <link rel="stylesheet" href="style.css">
 </head>
 
 <body>
-
-    <div id="stats-card">
-        <div class="stat-section">
-            <div class="label">Season Record</div>
-            <div class="value">
-                <span id="wins" class="win">0</span><span class="slash">/</span><span id="losses" class="loss">0</span>
+    <div id="stats-card" class="overlay-card">
+        <div class="stat-group">
+            <div class="text-group">
+                <div class="label-league">Season Record</div>
+                <div class="value-league">
+                    <span id="wins" class="win">0</span><span class="slash">/</span><span id="losses"
+                        class="loss">0</span>
+                </div>
+            </div>
+            <div class="text-group">
+                <div class="label-league">Winrate</div>
+                <div id="wr-value" class="value-league" style="color: var(--text-primary)">0%</div>
             </div>
         </div>
-
-        <div class="stat-section">
-            <div class="label">Winrate</div>
-            <div id="wr-value" class="value">0%</div>
-        </div>
     </div>
-
-    <script>
-        const socket = new WebSocket('ws://127.0.0.1:8080/ws');
-
-        socket.onmessage = (event) => {
-            try {
-                const data = JSON.parse(event.data);
-
-                const soloQ = data.queues?.find(q => q.queueType === "RANKED_SOLO_5x5");
-
-                if (soloQ) {
-                    const w = soloQ.wins || 0;
-                    const l = soloQ.losses || 0;
-                    const total = w + l;
-                    const wr = total > 0 ? ((w / total) * 100).toFixed(1) : "0.0";
-
-                    document.getElementById('wins').innerText = w;
-                    document.getElementById('losses').innerText = l;
-                    document.getElementById('wr-value').innerText = `${wr}%`;
-
-                    const wrElement = document.getElementById('wr-value');
-                    if (wr >= 60) wrElement.style.color = '#ffb900';
-                    else if (wr >= 50) wrElement.style.color = '#f0e6d2';
-                    else wrElement.style.color = '#7e7e7e';
-
-                    document.getElementById('stats-card').classList.add('visible');
-                }
-            } catch (e) {
-                console.error("Data error:", e);
-            }
-        };
-
-        socket.onclose = () => {
-            document.getElementById('stats-card').style.opacity = "0.3";
-        };
-    </script>
+    <script src="overlay.js"></script>
 </body>
 
 </html>

@@ -1,0 +1,136 @@
+:root {
+    --hextech-gold: #c8aa6e;
+    --hextech-black: rgba(6, 11, 19, 0.95);
+    --text-primary: #f0e6d2;
+    --text-secondary: #a09b8c;
+    --win-green: #1ef32d;
+    --loss-red: #ff4e50;
+
+    /* TUNED SCALE:
+       3.5vw is the sweet spot for a full-screen card overlay.
+       If it's still slightly too big for your liking, drop this to 3vw.
+    */
+    font-size: 3.5vw;
+}
+
+body {
+    background: transparent;
+    margin: 0;
+    padding: 0;
+    font-family: 'Segoe UI', Roboto, sans-serif;
+    color: white;
+    overflow: hidden;
+    height: 100vh;
+    width: 100vw;
+    display: flex;
+    align-items: center;
+    /* Center vertically */
+    justify-content: center;
+    /* Center horizontally */
+}
+
+.overlay-card {
+    display: flex;
+    align-items: center;
+    background: var(--hextech-black);
+    border: 0.12rem solid var(--hextech-gold);
+    border-radius: 0.8rem;
+    padding: 0.8rem 2rem;
+    box-shadow: 0 0.8rem 2.5rem rgba(0, 0, 0, 0.8);
+
+    /* Ensures it stays within the 1920px width with a bit of breathing room */
+    width: 95vw;
+    max-width: 1800px;
+    box-sizing: border-box;
+
+    opacity: 0;
+    transform: translateY(1rem);
+    transition: opacity 0.8s ease, transform 0.5s ease;
+    backface-visibility: hidden;
+}
+
+.overlay-card.visible {
+    opacity: 1;
+    transform: translateY(0);
+}
+
+/* Icons */
+.icon-container {
+    width: 8rem;
+    height: 8rem;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    overflow: hidden;
+    flex-shrink: 0;
+}
+
+#rank-icon {
+    width: 14rem;
+    height: 14rem;
+    object-fit: contain;
+    transform: scale(1.5);
+    filter: drop-shadow(0 0 1rem rgba(0, 0, 0, 1));
+}
+
+.text-group {
+    display: flex;
+    flex-direction: column;
+    justify-content: center;
+    margin-left: 0.5rem;
+    flex-grow: 1;
+}
+
+.summoner-name {
+    font-size: 1rem;
+    font-weight: 600;
+    color: var(--text-primary);
+}
+
+.summoner-tag {
+    opacity: 0.6;
+    font-size: 0.8em;
+}
+
+.tier-text {
+    font-size: 2.8rem;
+    /* Scaled down from 3.5 to prevent overflow */
+    font-weight: 900;
+    text-transform: uppercase;
+    line-height: 1;
+    text-shadow: 0.15rem 0.15rem 0.4rem rgba(0, 0, 0, 1);
+}
+
+.label-league {
+    font-size: 0.7rem;
+    text-transform: uppercase;
+    color: var(--text-secondary);
+    letter-spacing: 0.15rem;
+}
+
+.value-league {
+    font-size: 1.8rem;
+    font-weight: 800;
+    color: var(--hextech-gold);
+}
+
+/* For Session/Season Winrate Cards specifically */
+.stat-group {
+    display: flex;
+    justify-content: space-around;
+    /* Changed to space-around for better filling */
+    width: 100%;
+}
+
+.win {
+    color: var(--win-green);
+}
+
+.loss {
+    color: var(--loss-red);
+}
+
+.slash {
+    color: #555;
+    margin: 0 0.2rem;
+}

@@ -2,103 +2,11 @@
 <html>
 
 <head>
-    <meta charset="UTF-8">
-    <style>
-        body {
-            background: transparent;
-            margin: 0;
-            padding: 30px;
-            font-family: 'Segoe UI', Roboto, sans-serif;
-            color: white;
-            overflow: hidden;
-        }
-
-        #rank-card {
-            display: flex;
-            align-items: center;
-            background: rgba(6, 11, 19, 0.95);
-            border: 2px solid #c8aa6e;
-            border-radius: 12px;
-            padding: 5px 45px 5px 0px;
-            width: fit-content;
-            min-width: 400px;
-            opacity: 0;
-            transition: opacity 0.8s ease, transform 0.5s ease;
-            transform: translateY(10px);
-            box-shadow: 0 10px 40px rgba(0, 0, 0, 0.6);
-        }
-
-        #rank-card.visible {
-            opacity: 1;
-            transform: translateY(0);
-        }
-
-        .icon-container {
-            width: 180px;
-            height: 180px;
-            display: flex;
-            align-items: center;
-            justify-content: center;
-            overflow: hidden;
-            flex-shrink: 0;
-            margin-right: -10px;
-        }
-
-        #rank-icon {
-            width: 320px;
-            height: 320px;
-            object-fit: contain;
-            transform: scale(1.6);
-            filter: drop-shadow(0 0 20px rgba(0, 0, 0, 0.8));
-            flex-shrink: 0;
-        }
-
-        .text-group {
-            display: flex;
-            flex-direction: column;
-            justify-content: center;
-            z-index: 2;
-            flex-grow: 1;
-        }
-
-        .summoner-name {
-            font-size: 1.2rem;
-            font-weight: 600;
-            color: #f0e6d2;
-            margin-bottom: -2px;
-            text-shadow: 1px 1px 3px rgba(0, 0, 0, 0.8);
-            white-space: nowrap;
-        }
-
-        .summoner-tag {
-            color: #7e7e7e;
-            font-weight: 400;
-        }
-
-        .tier-text {
-            font-size: 2.4rem;
-            font-weight: 900;
-            text-transform: uppercase;
-            color: #f0e6d2;
-            line-height: 1;
-            margin-bottom: 2px;
-            letter-spacing: 1px;
-            text-shadow: 2px 2px 5px rgba(0, 0, 0, 0.9);
-            white-space: nowrap;
-        }
-
-        .lp-text {
-            color: #c8aa6e;
-            font-size: 1.6rem;
-            font-weight: 700;
-            text-shadow: 1px 1px 3px rgba(0, 0, 0, 0.8);
-            white-space: nowrap;
-        }
-    </style>
+    <link rel="stylesheet" href="style.css">
 </head>
 
 <body>
-    <div id="rank-card">
+    <div id="rank-card" class="overlay-card">
         <div class="icon-container">
             <img id="rank-icon" src="" alt="">
         </div>
@@ -106,46 +14,13 @@
             <div class="summoner-name">
                 <span id="game-name">Loading</span><span id="tag-line" class="summoner-tag">#...</span>
             </div>
-            <div id="tier" class="tier-text">---</div>
-            <div id="lp" class="lp-text">-- LP</div>
+            <div class="tier-row">
+                <div id="tier" class="tier-text">---</div>
+                <div id="lp" class="value-league">-- LP</div>
+            </div>
         </div>
     </div>
-
-    <script>
-        const socket = new WebSocket('ws://127.0.0.1:8080/ws');
-
-        socket.onmessage = (event) => {
-            try {
-                const data = JSON.parse(event.data);
-
-                if (data.gameName) {
-                    document.getElementById('game-name').innerText = data.gameName;
-                    document.getElementById('tag-line').innerText = `#${data.tagLine}`;
-                }
-
-                const soloQ = data.queues?.find(q => q.queueType === "RANKED_SOLO_5x5");
-                if (soloQ) {
-                    const tierName = soloQ.tier;
-                    const division = (soloQ.division && soloQ.division !== "NA") ? soloQ.division : "";
-
-                    document.getElementById('tier').innerText = `${tierName} ${division}`.trim();
-                    document.getElementById('lp').innerText = `${soloQ.leaguePoints} LP`;
-
-                    const tier = tierName.toLowerCase();
-                    const iconImg = document.getElementById('rank-icon');
-                    const newSrc = `https://raw.communitydragon.org/latest/plugins/rcp-fe-lol-static-assets/global/default/images/ranked-emblem/emblem-${tier}.png`;
-
-                    if (iconImg.src !== newSrc) {
-                        iconImg.src = newSrc;
-                    }
-
-                    document.getElementById('rank-card').classList.add('visible');
-                }
-            } catch (e) {
-                console.error("Overlay Error:", e);
-            }
-        };
-    </script>
+    <script src="overlay.js"></script>
 </body>
 
 </html>

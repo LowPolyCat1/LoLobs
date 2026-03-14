@@ -2,77 +2,26 @@
 <html>
 
 <head>
-    <meta charset="UTF-8">
-    <style>
-        body {
-            background: transparent;
-            margin: 0;
-            padding: 10px;
-            font-family: sans-serif;
-            color: white;
-        }
-
-        #session-card {
-            display: flex;
-            background: rgba(10, 10, 20, 0.9);
-            border-left: 4px solid #00cfbc;
-            padding: 12px 20px;
-            width: fit-content;
-            border-radius: 4px;
-        }
-
-        .stat-section {
-            display: flex;
-            flex-direction: column;
-            margin-right: 20px;
-        }
-
-        .label {
-            font-size: 0.7rem;
-            color: #8890b0;
-            text-transform: uppercase;
-        }
-
-        .value {
-            font-size: 1.4rem;
-            font-weight: bold;
-        }
-    </style>
+    <link rel="stylesheet" href="style.css">
 </head>
 
 <body>
-
-    <div id="session-card">
-        <div class="stat-section">
-            <div class="label">Session</div>
-            <div class="value"><span id="s-wins">0</span>W - <span id="s-losses">0</span>L</div>
-        </div>
-        <div class="stat-section">
-            <div class="label">Winrate</div>
-            <div id="s-wr" class="value">--%</div>
+    <div id="session-card" class="overlay-card">
+        <div class="stat-group">
+            <div class="text-group">
+                <div class="label-league">Current Session</div>
+                <div class="value-league">
+                    <span id="s-wins" class="win">0</span><span class="slash">/</span><span id="s-losses"
+                        class="loss">0</span>
+                </div>
+            </div>
+            <div class="text-group">
+                <div class="label-league">Session WR</div>
+                <div id="s-wr" class="value-league" style="color: var(--text-primary)">0%</div>
+            </div>
         </div>
     </div>
-
-    <script>
-        const socket = new WebSocket('ws://127.0.0.1:8080/ws');
-
-
-        socket.onmessage = (event) => {
-            const data = JSON.parse(event.data);
-
-            if (data.session) {
-                const w = data.session.wins;
-                const l = data.session.losses;
-                const total = w + l;
-                const wr = total > 0 ? ((w / total) * 100).toFixed(0) : "0";
-
-                document.getElementById('s-wins').innerText = w;
-                document.getElementById('s-losses').innerText = l;
-                document.getElementById('s-wr').innerText = `${wr}%`;
-            }
-        };
-
-    </script>
+    <script src="overlay.js"></script>
 </body>
 
 </html>
