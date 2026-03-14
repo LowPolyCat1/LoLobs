@@ -19,10 +19,8 @@
             background: rgba(6, 11, 19, 0.95);
             border: 2px solid #c8aa6e;
             border-radius: 12px;
-            /* Added padding to ensure text has space */
             padding: 5px 45px 5px 0px;
             width: fit-content;
-            /* Prevents the card from being squished by OBS bounds */
             min-width: 400px;
             opacity: 0;
             transition: opacity 0.8s ease, transform 0.5s ease;
@@ -60,7 +58,6 @@
             flex-direction: column;
             justify-content: center;
             z-index: 2;
-            /* Ensure text doesn't shrink */
             flex-grow: 1;
         }
 
@@ -87,7 +84,6 @@
             margin-bottom: 2px;
             letter-spacing: 1px;
             text-shadow: 2px 2px 5px rgba(0, 0, 0, 0.9);
-            /* CRITICAL FIX: Prevent division from wrapping to new line */
             white-space: nowrap;
         }
 
