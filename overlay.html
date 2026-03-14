@@ -1,20 +1,141 @@
 <!DOCTYPE html>
 <html>
 
-<body style="background: transparent; color: white; font-family: sans-serif;">
-    <div id="rank-card" style="padding: 20px; background: rgba(0,0,0,0.5); border-radius: 10px; display: inline-block;">
-        <h2 id="tier">WAITING FOR LEAGUE...</h2>
-        <p id="lp">0 LP</p>
+<head>
+    <meta charset="UTF-8">
+    <style>
+        body {
+            background: transparent;
+            margin: 0;
+            padding: 30px;
+            font-family: 'Segoe UI', Roboto, Helvetica, Arial, sans-serif;
+            color: white;
+            overflow: hidden;
+        }
+
+        #rank-card {
+            display: flex;
+            align-items: center;
+            background: rgba(6, 11, 19, 0.95);
+            border: 2px solid #c8aa6e;
+            border-radius: 12px;
+            padding: 5px 35px 5px 5px;
+            /* Weniger Padding oben/unten */
+            width: fit-content;
+            opacity: 0;
+            transition: opacity 0.8s ease, transform 0.5s ease;
+            transform: translateY(10px);
+            box-shadow: 0 10px 30px rgba(0, 0, 0, 0.5);
+        }
+
+        #rank-card.visible {
+            opacity: 1;
+            transform: translateY(0);
+        }
+
+        /* Container, der das Icon "beschneidet" */
+        .icon-container {
+            width: 120px;
+            /* Kleinerer Container zum Croppen */
+            height: 120px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            overflow: hidden;
+            flex-shrink: 0;
+            margin-right: 15px;
+        }
+
+        #rank-icon {
+            width: 280px;
+            /* Bild massiv vergrößert */
+            height: 280px;
+            object-fit: contain;
+            /* Zoomt tief in das Asset hinein, um die Ränder zu ignorieren */
+            transform: scale(1.8);
+            filter: drop-shadow(0 0 15px rgba(0, 0, 0, 0.7));
+        }
+
+        .text-group {
+            display: flex;
+            flex-direction: column;
+            justify-content: center;
+        }
+
+        /* Tier und Division in einer Zeile */
+        .rank-info {
+            display: flex;
+            gap: 10px;
+            align-items: baseline;
+        }
+
+        .tier-text {
+            font-size: 2.5rem;
+            font-weight: 800;
+            text-transform: uppercase;
+            color: #f0e6d2;
+            letter-spacing: 2px;
+            line-height: 1;
+            text-shadow: 2px 2px 4px rgba(0, 0, 0, 0.5);
+        }
+
+        .division-text {
+            font-size: 2rem;
+            font-weight: 600;
+            color: #c8aa6e;
+        }
+
+        .lp-text {
+            color: #a09b8c;
+            font-size: 1.3rem;
+            font-weight: 600;
+            margin-top: 2px;
+            text-transform: uppercase;
+        }
+    </style>
+</head>
+
+<body>
+    <div id="rank-card">
+        <div class="icon-container">
+            <img id="rank-icon" src="">
+        </div>
+        <div class="text-group">
+            <div class="rank-info">
+                <span id="tier" class="tier-text">LOADING</span>
+                <span id="division" class="division-text"></span>
+            </div>
+            <div id="lp" class="lp-text">-- LP</div>
+        </div>
     </div>
 
     <script>
         const socket = new WebSocket('ws://127.0.0.1:8080/ws');
+
         socket.onmessage = (event) => {
-            const data = JSON.parse(event.data);
-            if (data.queues) {
-                const soloQ = data.queues.find(q => q.queueType === "RANKED_SOLO_5x5");
-                document.getElementById('tier').innerText = `${soloQ.tier} ${soloQ.division}`;
-                document.getElementById('lp').innerText = `${soloQ.leaguePoints} LP`;
+            try {
+                const data = JSON.parse(event.data);
+                const soloQ = data.queues?.find(q => q.queueType === "RANKED_SOLO_5x5");
+
+                if (soloQ) {
+                    const tierName = soloQ.tier;
+                    const divName = soloQ.division !== "NA" ? soloQ.division : "";
+
+                    document.getElementById('tier').innerText = tierName;
+                    document.getElementById('division').innerText = divName;
+                    document.getElementById('lp').innerText = `${soloQ.leaguePoints} LP`;
+
+                    const iconUrl = `https://raw.communitydragon.org/latest/plugins/rcp-fe-lol-static-assets/global/default/images/ranked-emblem/emblem-${tierName.toLowerCase()}.png`;
+                    const iconImg = document.getElementById('rank-icon');
+
+                    if (iconImg.src !== iconUrl) {
+                        iconImg.src = iconUrl;
+                    }
+
+                    document.getElementById('rank-card').classList.add('visible');
+                }
+            } catch (e) {
+                console.error("Parsing error:", e);
             }
         };
     </script>
