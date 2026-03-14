@@ -1,0 +1,18 @@
+[package]
+name = "LoLobs"
+version = "0.1.0"
+edition = "2024"
+
+[dependencies]
+irelia = { version = "*", features = ["full"] }
+actix-web = "*"
+tokio = { version = "*", features = ["full"] }
+serde = { version = "*", features = ["derive"] }
+serde_json = "*"
+actix-web-actors = "*"
+actix = "*"
+async-stream = "*"
+futures-util = "*"
+actix-files = "*"
+reqwest = { version = "0.12", features = ["json", "rustls-tls-manual-roots"] }
+rustls = { version = "0.23", features = ["ring"] }

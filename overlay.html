@@ -1,0 +1,23 @@
+<!DOCTYPE html>
+<html>
+
+<body style="background: transparent; color: white; font-family: sans-serif;">
+    <div id="rank-card" style="padding: 20px; background: rgba(0,0,0,0.5); border-radius: 10px; display: inline-block;">
+        <h2 id="tier">WAITING FOR LEAGUE...</h2>
+        <p id="lp">0 LP</p>
+    </div>
+
+    <script>
+        const socket = new WebSocket('ws://127.0.0.1:8080/ws');
+        socket.onmessage = (event) => {
+            const data = JSON.parse(event.data);
+            if (data.queues) {
+                const soloQ = data.queues.find(q => q.queueType === "RANKED_SOLO_5x5");
+                document.getElementById('tier').innerText = `${soloQ.tier} ${soloQ.division}`;
+                document.getElementById('lp').innerText = `${soloQ.leaguePoints} LP`;
+            }
+        };
+    </script>
+</body>
+
+</html>
