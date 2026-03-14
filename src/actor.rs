@@ -14,14 +14,12 @@ impl Actor for MyWs {
     fn started(&mut self, ctx: &mut Self::Context) {
         let mut rx = self.receiver.resubscribe();
 
-        // Handle broadcast messages
         ctx.add_stream(async_stream::stream! {
             while let Ok(msg) = rx.recv().await {
                 yield msg;
             }
         });
 
-        // Handle initial data fetch
         let addr = ctx.address();
         ctx.run_later(std::time::Duration::from_millis(100), move |_, _| {
             tokio::spawn(async move {
