@@ -34,7 +34,7 @@ async fn main() -> std::io::Result<()> {
 
     println!("-------------------------------------------");
     println!("🚀 Rank Overlay Server Started!");
-    println!("WebSocket URL: ws://127.0.0.1:8080/ws");
+    println!("WebSocket URL: ws://127.0.0.1:2009/ws");
     println!("Open overlay.html in your browser or OBS.");
     println!("-------------------------------------------");
 
@@ -43,7 +43,7 @@ async fn main() -> std::io::Result<()> {
             .app_data(web::Data::new(Arc::clone(&tx_arc)))
             .route("/ws", web::get().to(ws_route))
     })
-    .bind(("127.0.0.1", 8080))?
+    .bind(("127.0.0.1", 2009))?
     .run()
     .await
 }
