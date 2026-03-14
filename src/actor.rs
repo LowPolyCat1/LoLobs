@@ -1,6 +1,6 @@
 use crate::lcu::get_initial_rank;
 use crate::messages::InitialData;
-use actix::{Actor, Addr, AsyncContext, Handler, StreamHandler};
+use actix::{Actor, AsyncContext, Handler, StreamHandler};
 use actix_web_actors::ws;
 use tokio::sync::broadcast;
 
