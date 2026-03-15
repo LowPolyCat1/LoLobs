@@ -44,6 +44,7 @@ async fn main() -> std::io::Result<()> {
             .app_data(web::Data::new(Arc::clone(&tx_arc)))
             .route("/ws", web::get().to(ws_route))
     })
+    .workers(1)
     .bind((IP, PORT))?
     .run()
     .await
