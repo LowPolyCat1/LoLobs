@@ -11,26 +11,31 @@ function connect() {
     socket.onmessage = (event) => {
         try {
             const data = JSON.parse(event.data);
-            const soloQ = data.queues?.find(q => q.queueType === "RANKED_SOLO_5x5");
 
-            // Handle Summoner Name
-            if (data.gameName && document.getElementById('game-name')) {
-                document.getElementById('game-name').innerText = data.gameName;
-                document.getElementById('tag-line').innerText = `#${data.tagLine || 'NA1'}`;
+            // 1. Handle Summoner Info
+            if (data.gameName) {
+                const nameEl = document.getElementById('game-name');
+                const tagEl = document.getElementById('tag-line');
+                if (nameEl) nameEl.innerText = data.gameName;
+                if (tagEl) tagEl.innerText = `#${data.tagLine || 'NA1'}`;
             }
 
-            // Handle Rank Stats
+            // 2. Handle Ranked Stats
+            const soloQ = data.queues?.find(q => q.queueType === "RANKED_SOLO_5x5");
             if (soloQ) {
-                if (document.getElementById('tier')) {
-                    const division = (soloQ.division && soloQ.division !== "NA") ? soloQ.division : "";
-                    document.getElementById('tier').innerText = `${soloQ.tier} ${division}`.trim();
-                    document.getElementById('lp').innerText = `${soloQ.leaguePoints} LP`;
+                const tierEl = document.getElementById('tier');
+                const lpEl = document.getElementById('lp');
 
-                    const iconImg = document.getElementById('rank-icon');
-                    if (iconImg) {
-                        const newSrc = `https://raw.communitydragon.org/latest/plugins/rcp-fe-lol-static-assets/global/default/images/ranked-emblem/emblem-${soloQ.tier.toLowerCase()}.png`;
-                        if (iconImg.src !== newSrc) iconImg.src = newSrc;
-                    }
+                if (tierEl) {
+                    const division = (soloQ.division && soloQ.division !== "NA") ? soloQ.division : "";
+                    tierEl.innerText = `${soloQ.tier} ${division}`.trim();
+                }
+                if (lpEl) lpEl.innerText = `${soloQ.leaguePoints} LP`;
+
+                const iconImg = document.getElementById('rank-icon');
+                if (iconImg && soloQ.tier) {
+                    const newSrc = `https://raw.communitydragon.org/latest/plugins/rcp-fe-lol-static-assets/global/default/images/ranked-emblem/emblem-${soloQ.tier.toLowerCase()}.png`;
+                    if (iconImg.src !== newSrc) iconImg.src = newSrc;
                 }
 
                 if (document.getElementById('wins')) {
@@ -44,18 +49,19 @@ function connect() {
                 }
             }
 
-            // Handle Session Stats
-            if (data.session && document.getElementById('s-wins')) {
+            // 3. Handle Session Stats (Live Updates)
+            if (data.session) {
                 const sw = data.session.wins;
                 const sl = data.session.losses;
                 const sTotal = sw + sl;
                 const sWr = sTotal > 0 ? ((sw / sTotal) * 100).toFixed(0) : "0";
-                document.getElementById('s-wins').innerText = sw;
-                document.getElementById('s-losses').innerText = sl;
-                document.getElementById('s-wr').innerText = `${sWr}%`;
+
+                if (document.getElementById('s-wins')) document.getElementById('s-wins').innerText = sw;
+                if (document.getElementById('s-losses')) document.getElementById('s-losses').innerText = sl;
+                if (document.getElementById('s-wr')) document.getElementById('s-wr').innerText = `${sWr}%`;
             }
 
-            // Reveal Overlay
+            // Reveal cards once data arrives
             document.querySelectorAll('.overlay-card').forEach(el => el.classList.add('visible'));
 
         } catch (e) {
@@ -63,16 +69,13 @@ function connect() {
         }
     };
 
-    socket.onclose = (e) => {
-        console.log("Socket closed. Reconnecting in 2 seconds...", e.reason);
+    socket.onclose = () => {
         setTimeout(connect, 2000);
     };
 
     socket.onerror = (err) => {
-        console.error("Socket encountered error: ", err.message, "Closing socket");
         socket.close();
     };
 }
 
-// Initial Call
 connect();

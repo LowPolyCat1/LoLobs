@@ -12,7 +12,6 @@ async fn ws_route(
     stream: web::Payload,
     tx: web::Data<Arc<broadcast::Sender<String>>>,
 ) -> impl Responder {
-    tracing::debug!("starting websocket");
     ws::start(
         actor::MyWs {
             receiver: tx.subscribe(),
@@ -28,6 +27,7 @@ const PORT: u16 = 2009;
 #[actix_web::main]
 async fn main() -> std::io::Result<()> {
     tracing_subscriber::fmt().init();
+
     rustls::crypto::ring::default_provider()
         .install_default()
         .expect("Failed to install rustls crypto provider");
@@ -35,9 +35,9 @@ async fn main() -> std::io::Result<()> {
     let (tx, _) = broadcast::channel::<String>(32);
     let tx_arc = Arc::new(tx);
 
-    lcu::spawn_lcu_listener(Arc::clone(&tx_arc));
+    lcu::spawn_lcu_listener((*tx_arc).clone());
 
-    tracing::info!("Starting Overlay on {}:{}", IP, PORT);
+    tracing::info!("Starting Overlay Server on {}:{}", IP, PORT);
 
     HttpServer::new(move || {
         App::new()

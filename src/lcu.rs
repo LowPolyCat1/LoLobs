@@ -1,7 +1,10 @@
 use irelia::ws::{LcuWebSocket, types::EventKind};
 use serde::{Deserialize, Serialize};
 use std::sync::{Arc, Mutex};
+use std::time::Duration;
 use tokio::sync::broadcast;
+
+type ConcreteLcuClient = irelia::rest::LcuClient<irelia::requests::RequestClientType>;
 
 #[derive(Serialize, Deserialize, Clone, Debug)]
 #[serde(rename_all = "camelCase")]
@@ -18,139 +21,121 @@ pub struct RankedStats {
     pub session: Option<Session>,
 }
 
-pub async fn get_initial_rank() -> Option<String> {
-    let client = irelia::requests::new();
-    let lcu_client = irelia::rest::LcuClient::connect_with_request_client(&client).ok()?;
-    let stats: serde_json::Value = lcu_client
-        .get("/lol-ranked/v1/current-ranked-stats")
-        .await
-        .ok()?;
-
-    let mut payload = stats.clone();
-    payload["session"] = serde_json::json!({ "wins": 0, "losses": 0 });
-    serde_json::to_string(&payload).ok()
+struct LcuState {
+    summoner_id: Option<u64>,
+    baseline: Option<(i64, i64)>,
 }
 
-pub fn spawn_lcu_listener(tx: Arc<broadcast::Sender<String>>) {
-    let rt_handle = tokio::runtime::Handle::current();
-    let session_baseline = Arc::new(Mutex::new(None::<(i64, i64)>));
-    let last_payload = Arc::new(Mutex::new(None::<String>));
+pub async fn get_lcu_client() -> Option<ConcreteLcuClient> {
+    let client = irelia::requests::new();
+    irelia::rest::LcuClient::connect_with_request_client(&client).ok()
+}
 
-    std::thread::spawn(move || {
+pub async fn fetch_endpoint(uri: &str) -> Option<serde_json::Value> {
+    let client: ConcreteLcuClient = get_lcu_client().await?;
+    client.get::<serde_json::Value>(uri).await.ok()
+}
+
+fn handle_ranked_stats(data: &serde_json::Value, state: &Arc<Mutex<LcuState>>) -> Option<String> {
+    let mut stats = serde_json::from_value::<RankedStats>(data.clone()).ok()?;
+
+    let solo_q = stats
+        .queues
+        .iter()
+        .find(|q| q["queueType"] == "RANKED_SOLO_5x5")?;
+
+    let cur_w = solo_q["wins"].as_i64().unwrap_or(0);
+    let cur_l = solo_q["losses"].as_i64().unwrap_or(0);
+
+    let mut s = state.lock().unwrap();
+    let (base_w, base_l) = *s.baseline.get_or_insert_with(|| {
+        tracing::info!(target: "lcu_monitor", "New baseline established: {}W - {}L", cur_w, cur_l);
+        (cur_w, cur_l)
+    });
+
+    stats.session = Some(Session {
+        wins: cur_w - base_w,
+        losses: cur_l - base_l,
+    });
+
+    serde_json::to_string(&stats).ok()
+}
+
+pub fn spawn_lcu_listener(tx: broadcast::Sender<String>) {
+    let state = Arc::new(Mutex::new(LcuState {
+        summoner_id: None,
+        baseline: None,
+    }));
+
+    tokio::spawn(async move {
+        tracing::info!("LCU Listener task spawned. Searching for active League client...");
+
         loop {
-            let mut ws_client = LcuWebSocket::new();
-            let session_clone = Arc::clone(&session_baseline);
-            let tx_clone = Arc::clone(&tx);
-            let cache_clone = Arc::clone(&last_payload);
+            let Some(summoner) = fetch_endpoint("/lol-summoner/v1/current-summoner").await else {
+                tokio::time::sleep(Duration::from_secs(5)).await;
+                continue;
+            };
 
-            let _connection =
-                ws_client.subscribe_closure(EventKind::json_api_event(), move |event| {
-                    let uri = &event.2.uri;
-
-                    if uri == "/lol-ranked/v1/current-ranked-stats"
-                        || uri == "/lol-summoner/v1/current-summoner"
-                    {
-                        println!(">>> LCU Event Triggered: {}", uri);
-
-                        let tx_inner = Arc::clone(&tx_clone);
-                        let session_inner = Arc::clone(&session_clone);
-                        let cache_inner = Arc::clone(&cache_clone);
-
-                        tokio::runtime::Handle::current().block_on(async move {
-                            if let Some(data_str) = get_initial_rank().await {
-                                if let Ok(mut stats) =
-                                    serde_json::from_str::<RankedStats>(&data_str)
-                                {
-                                    let solo_q = stats
-                                        .queues
-                                        .iter()
-                                        .find(|q| q["queueType"] == "RANKED_SOLO_5x5");
-
-                                    if let Some(q) = solo_q {
-                                        let cur_w = q["wins"].as_i64().unwrap_or(0);
-                                        let cur_l = q["losses"].as_i64().unwrap_or(0);
-
-                                        let mut baseline = session_inner.lock().unwrap();
-                                        let (base_w, base_l) =
-                                            *baseline.get_or_insert((cur_w, cur_l));
-
-                                        stats.session = Some(Session {
-                                            wins: cur_w - base_w,
-                                            losses: cur_l - base_l,
-                                        });
-
-                                        if let Ok(json) = serde_json::to_string(&stats) {
-                                            *cache_inner.lock().unwrap() = Some(json.clone());
-                                            let _ = tx_inner.send(json);
-                                            println!(">>> Automatic Update Sent to OBS.");
-                                        }
-                                    }
-                                }
-                            }
-                        });
-                    }
-                });
-
-            if _connection.is_some() {
-                println!(">>> LCU Connected. Session baseline is preserved.");
-
-                let tx_init = Arc::clone(&tx);
-                let session_init = Arc::clone(&session_baseline);
-                let cache_init = Arc::clone(&last_payload);
-
-                rt_handle.block_on(async {
-                    if let Some(data_str) = get_initial_rank().await {
-                        if let Ok(mut stats) = serde_json::from_str::<RankedStats>(&data_str) {
-                            let solo_q = stats
-                                .queues
-                                .iter()
-                                .find(|q| q["queueType"] == "RANKED_SOLO_5x5");
-                            if let Some(q) = solo_q {
-                                let cur_w = q["wins"].as_i64().unwrap_or(0);
-                                let cur_l = q["losses"].as_i64().unwrap_or(0);
-
-                                let mut b = session_init.lock().unwrap();
-                                let (base_w, base_l) = *b.get_or_insert((cur_w, cur_l));
-
-                                stats.session = Some(Session {
-                                    wins: cur_w - base_w,
-                                    losses: cur_l - base_l,
-                                });
-
-                                if let Ok(json) = serde_json::to_string(&stats) {
-                                    *cache_init.lock().unwrap() = Some(json.clone());
-                                    let _ = tx_init.send(json);
-                                }
-                            }
-                        }
-                    }
-                });
-
-                loop {
-                    std::thread::sleep(std::time::Duration::from_secs(5));
-
-                    if let Some(cached) = last_payload.lock().unwrap().clone() {
-                        let _ = tx.send(cached);
-                    }
-
-                    if rt_handle.block_on(async { crate::lcu::get_summoner_data().await.is_none() })
-                    {
-                        println!(">>> LCU Disconnected. (Baseline preserved)");
-                        break;
-                    }
+            let new_id = summoner["summonerId"].as_u64();
+            {
+                let mut s = state.lock().unwrap();
+                if s.summoner_id != new_id {
+                    tracing::info!(target: "lcu_monitor", "Account detected: ID {:?}", new_id);
+                    s.summoner_id = new_id;
+                    s.baseline = None;
                 }
             }
-            std::thread::sleep(std::time::Duration::from_secs(5));
+
+            let mut ws_client = LcuWebSocket::new();
+            let tx_inner = tx.clone();
+            let state_inner = Arc::clone(&state);
+
+            let connection = ws_client.subscribe_closure(EventKind::json_api_event(), move |event| {
+                let payload = &event.2;
+
+                match payload.uri.as_str() {
+                    "/lol-ranked/v1/current-ranked-stats" => {
+                        if let Some(json) = handle_ranked_stats(&payload.data, &state_inner) {
+                            let _ = tx_inner.send(json);
+                            tracing::info!(target: "overlay_update", "Pushing Ranked Stats update");
+                        }
+                    }
+                    "/lol-summoner/v1/current-summoner" => {
+                        let _ = tx_inner.send(payload.data.to_string());
+                        tracing::info!(target: "overlay_update", "Pushing Summoner profile update");
+                    }
+                    _ => {}
+                }
+            });
+
+            if connection.is_some() {
+                tracing::info!(target: "lcu_monitor", "Connected to LCU WebSocket.");
+
+                if let Some(profile) = fetch_endpoint("/lol-summoner/v1/current-summoner").await {
+                    if let Ok(json) = serde_json::to_string(&profile) {
+                        let _ = tx.send(json);
+                        tracing::info!(target: "overlay_update", "Initial Sync: Summoner Profile sent");
+                    }
+                }
+
+                if let Some(stats) = fetch_endpoint("/lol-ranked/v1/current-ranked-stats").await {
+                    if let Some(json) = handle_ranked_stats(&stats, &state) {
+                        let _ = tx.send(json);
+                        tracing::info!(target: "overlay_update", "Initial Sync: Ranked Stats sent");
+                    }
+                }
+
+                while fetch_endpoint("/lol-summoner/v1/current-summoner")
+                    .await
+                    .is_some()
+                {
+                    tokio::time::sleep(Duration::from_secs(5)).await;
+                }
+
+                tracing::warn!(target: "lcu_monitor", "LCU connection lost. Retrying...");
+            }
+
+            tokio::time::sleep(Duration::from_secs(5)).await;
         }
     });
-}
-
-pub async fn get_summoner_data() -> Option<String> {
-    let client = irelia::requests::new();
-    let lcu_client = irelia::rest::LcuClient::connect_with_request_client(&client).ok()?;
-    let summoner: serde_json::Value = lcu_client
-        .get("/lol-summoner/v1/current-summoner")
-        .await
-        .ok()?;
-    serde_json::to_string(&summoner).ok()
 }
