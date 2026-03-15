@@ -111,19 +111,17 @@ pub fn spawn_lcu_listener(tx: broadcast::Sender<String>) {
             if connection.is_some() {
                 tracing::info!(target: "lcu_monitor", "Connected to LCU WebSocket.");
 
-                if let Some(profile) = fetch_endpoint("/lol-summoner/v1/current-summoner").await {
-                    if let Ok(json) = serde_json::to_string(&profile) {
+                if let Some(profile) = fetch_endpoint("/lol-summoner/v1/current-summoner").await
+                    && let Ok(json) = serde_json::to_string(&profile) {
                         let _ = tx.send(json);
                         tracing::info!(target: "overlay_update", "Initial Sync: Summoner Profile sent");
                     }
-                }
 
-                if let Some(stats) = fetch_endpoint("/lol-ranked/v1/current-ranked-stats").await {
-                    if let Some(json) = handle_ranked_stats(&stats, &state) {
+                if let Some(stats) = fetch_endpoint("/lol-ranked/v1/current-ranked-stats").await
+                    && let Some(json) = handle_ranked_stats(&stats, &state) {
                         let _ = tx.send(json);
                         tracing::info!(target: "overlay_update", "Initial Sync: Ranked Stats sent");
                     }
-                }
 
                 while fetch_endpoint("/lol-summoner/v1/current-summoner")
                     .await
