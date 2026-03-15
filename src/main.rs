@@ -12,6 +12,7 @@ async fn ws_route(
     stream: web::Payload,
     tx: web::Data<Arc<broadcast::Sender<String>>>,
 ) -> impl Responder {
+    tracing::debug!("starting websocket");
     ws::start(
         actor::MyWs {
             receiver: tx.subscribe(),
@@ -21,8 +22,12 @@ async fn ws_route(
     )
 }
 
+const IP: &str = "127.0.0.1";
+const PORT: u16 = 2009;
+
 #[actix_web::main]
 async fn main() -> std::io::Result<()> {
+    tracing_subscriber::fmt().init();
     rustls::crypto::ring::default_provider()
         .install_default()
         .expect("Failed to install rustls crypto provider");
@@ -32,18 +37,14 @@ async fn main() -> std::io::Result<()> {
 
     lcu::spawn_lcu_listener(Arc::clone(&tx_arc));
 
-    println!("-------------------------------------------");
-    println!("🚀 Rank Overlay Server Started!");
-    println!("WebSocket URL: ws://127.0.0.1:2009/ws");
-    println!("Open overlay.html in your browser or OBS.");
-    println!("-------------------------------------------");
+    tracing::info!("Starting Overlay on {}:{}", IP, PORT);
 
     HttpServer::new(move || {
         App::new()
             .app_data(web::Data::new(Arc::clone(&tx_arc)))
             .route("/ws", web::get().to(ws_route))
     })
-    .bind(("127.0.0.1", 2009))?
+    .bind((IP, PORT))?
     .run()
     .await
 }
