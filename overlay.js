@@ -11,6 +11,35 @@ function connect() {
     socket.onmessage = (event) => {
         try {
             const data = JSON.parse(event.data);
+            // Inside your socket.onmessage try-catch block:
+
+            if (data.games && data.games.games) {
+                const container = document.getElementById('matches-container');
+                if (container) {
+                    // Clear previous and take the last 5 ranked games
+                    container.innerHTML = '';
+                    const recentGames = data.games.games
+                        .filter(g => g.queueId === 420) // 420 is Solo/Duo
+                        .slice(0, 5);
+
+                    recentGames.forEach(game => {
+                        const championId = game.participants[0].championId;
+                        const stats = game.participants[0].stats;
+
+                        // Determine result color
+                        let statusClass = 'remake';
+                        if (game.gameDuration > 300) { // If longer than 5 mins, not a remake
+                            statusClass = stats.win ? 'win-border' : 'loss-border';
+                        }
+
+                        const img = document.createElement('img');
+                        // Using CommunityDragon for champion icons
+                        img.src = `https://raw.communitydragon.org/latest/plugins/rcp-be-lol-game-data/global/default/v1/champion-icons/${championId}.png`;
+                        img.className = `match-icon ${statusClass}`;
+                        container.appendChild(img);
+                    });
+                }
+            }
 
             // 1. Handle Summoner Info
             if (data.gameName) {

@@ -104,6 +104,10 @@ pub fn spawn_lcu_listener(tx: broadcast::Sender<String>) {
                         let _ = tx_inner.send(payload.data.to_string());
                         tracing::info!(target: "overlay_update", "Pushing Summoner profile update");
                     }
+                    "/lol-match-history/v1/products/lol/current-summoner/matches" => {
+                        let _ = tx_inner.send(payload.data.to_string());
+                        tracing::info!(target: "overlay_update", "Pushing Match History update");
+                    }
                     _ => {}
                 }
             });
@@ -112,16 +116,24 @@ pub fn spawn_lcu_listener(tx: broadcast::Sender<String>) {
                 tracing::info!(target: "lcu_monitor", "Connected to LCU WebSocket.");
 
                 if let Some(profile) = fetch_endpoint("/lol-summoner/v1/current-summoner").await
-                    && let Ok(json) = serde_json::to_string(&profile) {
-                        let _ = tx.send(json);
-                        tracing::info!(target: "overlay_update", "Initial Sync: Summoner Profile sent");
-                    }
+                    && let Ok(json) = serde_json::to_string(&profile)
+                {
+                    let _ = tx.send(json);
+                    tracing::info!(target: "overlay_update", "Initial Sync: Summoner Profile sent");
+                }
 
                 if let Some(stats) = fetch_endpoint("/lol-ranked/v1/current-ranked-stats").await
-                    && let Some(json) = handle_ranked_stats(&stats, &state) {
+                    && let Some(json) = handle_ranked_stats(&stats, &state)
+                {
+                    let _ = tx.send(json);
+                    tracing::info!(target: "overlay_update", "Initial Sync: Ranked Stats sent");
+                }
+
+                if let Some(matches) = fetch_recent_matches().await {
+                    if let Ok(json) = serde_json::to_string(&matches) {
                         let _ = tx.send(json);
-                        tracing::info!(target: "overlay_update", "Initial Sync: Ranked Stats sent");
                     }
+                }
 
                 while fetch_endpoint("/lol-summoner/v1/current-summoner")
                     .await
@@ -136,4 +148,8 @@ pub fn spawn_lcu_listener(tx: broadcast::Sender<String>) {
             tokio::time::sleep(Duration::from_secs(5)).await;
         }
     });
+}
+
+pub async fn fetch_recent_matches() -> Option<serde_json::Value> {
+    fetch_endpoint("/lol-match-history/v1/products/lol/current-summoner/matches").await
 }

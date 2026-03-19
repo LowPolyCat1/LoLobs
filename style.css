@@ -133,3 +133,36 @@ body {
     color: #555;
     margin: 0 0.2rem;
 }
+
+
+/* Container for the matches */
+.matches-list {
+    display: flex;
+    gap: 1rem;
+    align-items: center;
+}
+
+/* Match Icon Styles */
+.match-icon {
+    width: 3.5rem;
+    height: 3.5rem;
+    border-radius: 0.4rem;
+    border: 0.15rem solid transparent;
+    box-shadow: 0 0.4rem 1rem rgba(0, 0, 0, 0.5);
+}
+
+/* Border Indicators */
+.win-border {
+    border-color: var(--win-green) !important;
+    filter: drop-shadow(0 0 0.3rem rgba(30, 243, 45, 0.4));
+}
+
+.loss-border {
+    border-color: var(--loss-red) !important;
+    filter: drop-shadow(0 0 0.3rem rgba(255, 78, 80, 0.4));
+}
+
+.remake {
+    border-color: #888 !important;
+    opacity: 0.7;
+}
