@@ -4,6 +4,10 @@ A lightweight, real-time desktop overlay backend built in **Rust**. This tool ho
 
 ---
 
+![example image](./image.png)
+
+---
+
 ## What it does
 
 * **Real-time Rank Updates:** Automatically detects changes in your Tier, Division, and LP without needing to refresh.
