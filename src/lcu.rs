@@ -129,11 +129,10 @@ pub fn spawn_lcu_listener(tx: broadcast::Sender<String>) {
                     tracing::info!(target: "overlay_update", "Initial Sync: Ranked Stats sent");
                 }
 
-                if let Some(matches) = fetch_recent_matches().await {
-                    if let Ok(json) = serde_json::to_string(&matches) {
+                if let Some(matches) = fetch_recent_matches().await
+                    && let Ok(json) = serde_json::to_string(&matches) {
                         let _ = tx.send(json);
                     }
-                }
 
                 while fetch_endpoint("/lol-summoner/v1/current-summoner")
                     .await
