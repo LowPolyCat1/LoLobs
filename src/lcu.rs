@@ -36,6 +36,19 @@ pub async fn fetch_endpoint(uri: &str) -> Option<serde_json::Value> {
     client.get::<serde_json::Value>(uri).await.ok()
 }
 
+fn route_event(
+    uri: &str,
+    data: &serde_json::Value,
+    state: &Arc<Mutex<LcuState>>,
+) -> Option<String> {
+    match uri {
+        "/lol-ranked/v1/current-ranked-stats" => handle_ranked_stats(data, state),
+        "/lol-summoner/v1/current-summoner" => Some(data.to_string()),
+        "/lol-match-history/v1/products/lol/current-summoner/matches" => Some(data.to_string()),
+        _ => None,
+    }
+}
+
 fn handle_ranked_stats(data: &serde_json::Value, state: &Arc<Mutex<LcuState>>) -> Option<String> {
     let mut stats = serde_json::from_value::<RankedStats>(data.clone()).ok()?;
 
@@ -92,23 +105,9 @@ pub fn spawn_lcu_listener(tx: broadcast::Sender<String>) {
 
             let connection = ws_client.subscribe_closure(EventKind::json_api_event(), move |event| {
                 let payload = &event.2;
-
-                match payload.uri.as_str() {
-                    "/lol-ranked/v1/current-ranked-stats" => {
-                        if let Some(json) = handle_ranked_stats(&payload.data, &state_inner) {
-                            let _ = tx_inner.send(json);
-                            tracing::info!(target: "overlay_update", "Pushing Ranked Stats update");
-                        }
-                    }
-                    "/lol-summoner/v1/current-summoner" => {
-                        let _ = tx_inner.send(payload.data.to_string());
-                        tracing::info!(target: "overlay_update", "Pushing Summoner profile update");
-                    }
-                    "/lol-match-history/v1/products/lol/current-summoner/matches" => {
-                        let _ = tx_inner.send(payload.data.to_string());
-                        tracing::info!(target: "overlay_update", "Pushing Match History update");
-                    }
-                    _ => {}
+                if let Some(json) = route_event(&payload.uri, &payload.data, &state_inner) {
+                    let _ = tx_inner.send(json);
+                    tracing::info!(target: "overlay_update", "Pushing update for {}", payload.uri);
                 }
             });
 
@@ -152,4 +151,141 @@ pub fn spawn_lcu_listener(tx: broadcast::Sender<String>) {
 
 pub async fn fetch_recent_matches() -> Option<serde_json::Value> {
     fetch_endpoint("/lol-match-history/v1/products/lol/current-summoner/matches").await
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use serde_json::json;
+
+    fn fresh_state() -> Arc<Mutex<LcuState>> {
+        Arc::new(Mutex::new(LcuState {
+            summoner_id: None,
+            baseline: None,
+        }))
+    }
+
+    fn ranked_payload(wins: i64, losses: i64) -> serde_json::Value {
+        json!({
+            "queues": [
+                { "queueType": "RANKED_SOLO_5x5", "wins": wins, "losses": losses },
+                { "queueType": "RANKED_FLEX_SR",  "wins": 99,   "losses": 99 }
+            ]
+        })
+    }
+
+    #[test]
+    fn first_call_establishes_baseline_with_zero_session() {
+        let state = fresh_state();
+        let out = handle_ranked_stats(&ranked_payload(10, 5), &state)
+            .expect("ranked stats with solo queue should produce output");
+        let parsed: serde_json::Value = serde_json::from_str(&out).unwrap();
+
+        assert_eq!(parsed["session"]["wins"], 0);
+        assert_eq!(parsed["session"]["losses"], 0);
+        assert_eq!(state.lock().unwrap().baseline, Some((10, 5)));
+    }
+
+    #[test]
+    fn subsequent_call_returns_delta_against_baseline() {
+        let state = fresh_state();
+        let _ = handle_ranked_stats(&ranked_payload(10, 5), &state);
+        let out = handle_ranked_stats(&ranked_payload(13, 7), &state)
+            .expect("second call should produce output");
+        let parsed: serde_json::Value = serde_json::from_str(&out).unwrap();
+
+        assert_eq!(parsed["session"]["wins"], 3);
+        assert_eq!(parsed["session"]["losses"], 2);
+    }
+
+    #[test]
+    fn baseline_is_only_set_once_across_calls() {
+        let state = fresh_state();
+        let _ = handle_ranked_stats(&ranked_payload(10, 5), &state);
+        let _ = handle_ranked_stats(&ranked_payload(13, 7), &state);
+        let _ = handle_ranked_stats(&ranked_payload(20, 10), &state);
+
+        assert_eq!(state.lock().unwrap().baseline, Some((10, 5)));
+    }
+
+    #[test]
+    fn missing_solo_queue_returns_none_and_leaves_baseline_unset() {
+        let state = fresh_state();
+        let payload = json!({
+            "queues": [
+                { "queueType": "RANKED_FLEX_SR", "wins": 5, "losses": 3 }
+            ]
+        });
+
+        assert!(handle_ranked_stats(&payload, &state).is_none());
+        assert_eq!(state.lock().unwrap().baseline, None);
+    }
+
+    #[test]
+    fn malformed_payload_returns_none_and_leaves_baseline_unset() {
+        let state = fresh_state();
+        let payload = json!({ "foo": "bar" });
+
+        assert!(handle_ranked_stats(&payload, &state).is_none());
+        assert_eq!(state.lock().unwrap().baseline, None);
+    }
+
+    #[test]
+    fn route_event_ranked_uri_returns_stats_with_session() {
+        let state = fresh_state();
+        let out = route_event(
+            "/lol-ranked/v1/current-ranked-stats",
+            &ranked_payload(10, 5),
+            &state,
+        )
+        .expect("ranked uri with valid payload should route");
+        let parsed: serde_json::Value = serde_json::from_str(&out).unwrap();
+
+        assert!(parsed["session"].is_object());
+    }
+
+    #[test]
+    fn route_event_summoner_uri_passes_data_through_as_string() {
+        let state = fresh_state();
+        let payload = json!({ "displayName": "Foo", "summonerId": 42 });
+        let out = route_event("/lol-summoner/v1/current-summoner", &payload, &state)
+            .expect("summoner uri should route");
+
+        assert_eq!(serde_json::from_str::<serde_json::Value>(&out).unwrap(), payload);
+    }
+
+    #[test]
+    fn route_event_match_history_uri_passes_data_through_as_string() {
+        let state = fresh_state();
+        let payload = json!({ "games": { "games": [] } });
+        let out = route_event(
+            "/lol-match-history/v1/products/lol/current-summoner/matches",
+            &payload,
+            &state,
+        )
+        .expect("match-history uri should route");
+
+        assert_eq!(serde_json::from_str::<serde_json::Value>(&out).unwrap(), payload);
+    }
+
+    #[test]
+    fn route_event_unknown_uri_returns_none() {
+        let state = fresh_state();
+        let out = route_event("/lol-unknown/v1/whatever", &json!({}), &state);
+
+        assert!(out.is_none());
+    }
+
+    #[test]
+    fn route_event_ranked_uri_with_malformed_payload_returns_none() {
+        let state = fresh_state();
+        let out = route_event(
+            "/lol-ranked/v1/current-ranked-stats",
+            &json!({ "foo": "bar" }),
+            &state,
+        );
+
+        assert!(out.is_none());
+        assert_eq!(state.lock().unwrap().baseline, None);
+    }
 }
