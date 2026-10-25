@@ -1,9 +1,15 @@
-use crate::snapshot::{Outbox, Topic};
+use crate::message::{
+    ChampionId, Division, MatchResult, MatchSummary, OverlayMessage, RankedSummary, Record, RiotId,
+    Tier,
+};
+use crate::snapshot::Outbox;
 use irelia::ws::{
     LcuWebSocket,
     types::{EventData, EventKind},
 };
-use serde::{Deserialize, Serialize};
+use serde::Deserialize;
+use serde::de::DeserializeOwned;
+use std::fmt;
 use std::future::Future;
 use std::sync::{Arc, Mutex, MutexGuard, PoisonError};
 use std::time::Duration;
@@ -15,53 +21,184 @@ const SUMMONER_URI: &str = "/lol-summoner/v1/current-summoner";
 const RANKED_STATS_URI: &str = "/lol-ranked/v1/current-ranked-stats";
 const MATCH_HISTORY_URI: &str = "/lol-match-history/v1/products/lol/current-summoner/matches";
 const RETRY_DELAY: Duration = Duration::from_secs(5);
+const RANKED_QUEUE: RankedQueue = RankedQueue {
+    queue_type: "RANKED_SOLO_5x5",
+    queue_id: QueueId(420),
+};
+const MATCH_LIMIT: usize = 5;
+const REMAKE_MAX_DURATION_SECS: u64 = 300;
 
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[derive(Deserialize, Clone, Copy, Debug, PartialEq, Eq)]
+#[serde(transparent)]
 struct SummonerId(u64);
 
-impl SummonerId {
-    fn from_summoner(summoner: &serde_json::Value) -> Option<Self> {
-        summoner["summonerId"].as_u64().map(Self)
+#[derive(Deserialize, Clone, Copy, Debug, PartialEq, Eq)]
+#[serde(transparent)]
+struct QueueId(u32);
+
+/// The queue that the overlay shows: its name in ranked stats and its ID in match history.
+#[derive(Clone, Copy, Debug)]
+struct RankedQueue {
+    queue_type: &'static str,
+    queue_id: QueueId,
+}
+
+#[derive(Debug)]
+struct LcuDataError {
+    uri: &'static str,
+    source: serde_json::Error,
+}
+
+impl fmt::Display for LcuDataError {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(
+            f,
+            "Cannot read the LCU data from {}: {}",
+            self.uri, self.source
+        )
     }
 }
 
-#[derive(Serialize, Deserialize, Clone, Copy, Debug, PartialEq, Eq)]
-pub struct Record {
-    pub wins: i64,
-    pub losses: i64,
+fn parse<T: DeserializeOwned>(
+    data: &serde_json::Value,
+    uri: &'static str,
+) -> Result<T, LcuDataError> {
+    T::deserialize(data).map_err(|source| LcuDataError { uri, source })
 }
 
-impl Record {
-    fn from_queue(queue: &serde_json::Value) -> Self {
-        Self {
-            wins: queue["wins"].as_i64().unwrap_or(0),
-            losses: queue["losses"].as_i64().unwrap_or(0),
-        }
-    }
-
-    fn since(self, baseline: Record) -> Record {
-        Record {
-            wins: self.wins - baseline.wins,
-            losses: self.losses - baseline.losses,
-        }
-    }
+fn log_data_error(err: &LcuDataError) {
+    tracing::warn!(target: "lcu_monitor", "{}", err);
 }
 
-#[derive(Serialize, Deserialize, Clone, Debug)]
+#[derive(Deserialize)]
 #[serde(rename_all = "camelCase")]
-pub struct RankedStats {
-    pub queues: Vec<serde_json::Value>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub session: Option<Record>,
+struct LcuAccount {
+    summoner_id: Option<SummonerId>,
 }
 
-impl RankedStats {
-    fn solo_queue_record(&self) -> Option<Record> {
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct LcuSummoner {
+    game_name: String,
+    tag_line: Option<String>,
+}
+
+impl LcuSummoner {
+    fn into_message(self) -> OverlayMessage {
+        OverlayMessage::Summoner(RiotId {
+            game_name: self.game_name,
+            tag_line: self.tag_line,
+        })
+    }
+}
+
+#[derive(Deserialize)]
+struct LcuRankedStats {
+    queues: Vec<LcuQueue>,
+}
+
+impl LcuRankedStats {
+    fn queue(&self, queue: RankedQueue) -> Option<&LcuQueue> {
         self.queues
             .iter()
-            .find(|q| q["queueType"] == "RANKED_SOLO_5x5")
-            .map(Record::from_queue)
+            .find(|q| q.queue_type == queue.queue_type)
     }
+}
+
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct LcuQueue {
+    queue_type: String,
+    #[serde(default)]
+    tier: Tier,
+    division: Option<String>,
+    #[serde(default)]
+    league_points: i64,
+    #[serde(default)]
+    wins: i64,
+    #[serde(default)]
+    losses: i64,
+}
+
+impl LcuQueue {
+    fn record(&self) -> Record {
+        Record {
+            wins: self.wins,
+            losses: self.losses,
+        }
+    }
+
+    fn summary(&self, session: Record) -> RankedSummary {
+        RankedSummary {
+            tier: self.tier.clone(),
+            division: self.division.as_deref().and_then(Division::from_lcu),
+            league_points: self.league_points,
+            season: self.record(),
+            session,
+        }
+    }
+}
+
+#[derive(Deserialize)]
+struct LcuMatchHistory {
+    games: LcuGameList,
+}
+
+#[derive(Deserialize)]
+struct LcuGameList {
+    games: Vec<LcuGame>,
+}
+
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct LcuGame {
+    queue_id: QueueId,
+    game_duration: u64,
+    participants: Vec<LcuParticipant>,
+}
+
+impl LcuGame {
+    // The match history only lists the current summoner as participant.
+    fn summary(&self) -> Option<MatchSummary> {
+        let participant = self.participants.first()?;
+        Some(MatchSummary {
+            champion_id: participant.champion_id,
+            result: self.result(&participant.stats),
+        })
+    }
+
+    fn result(&self, stats: &LcuParticipantStats) -> MatchResult {
+        if self.game_duration <= REMAKE_MAX_DURATION_SECS {
+            return MatchResult::Remake;
+        }
+        if stats.win {
+            return MatchResult::Win;
+        }
+        MatchResult::Loss
+    }
+}
+
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct LcuParticipant {
+    champion_id: ChampionId,
+    stats: LcuParticipantStats,
+}
+
+#[derive(Deserialize)]
+struct LcuParticipantStats {
+    win: bool,
+}
+
+fn recent_games(history: &LcuMatchHistory, queue: RankedQueue, limit: usize) -> Vec<MatchSummary> {
+    history
+        .games
+        .games
+        .iter()
+        .filter(|game| game.queue_id == queue.queue_id)
+        .filter_map(LcuGame::summary)
+        .take(limit)
+        .collect()
 }
 
 #[derive(Default)]
@@ -87,6 +224,16 @@ impl SessionTracker {
         });
         current.since(baseline)
     }
+}
+
+fn ranked_summary(
+    stats: &LcuRankedStats,
+    queue: RankedQueue,
+    tracker: &mut SessionTracker,
+) -> Option<RankedSummary> {
+    let queue = stats.queue(queue)?;
+    let session = tracker.session(queue.record());
+    Some(queue.summary(session))
 }
 
 type SharedState = Arc<Mutex<SessionTracker>>;
@@ -127,13 +274,6 @@ impl LcuSource for IreliaSource {
 
 fn lock_state(state: &SharedState) -> MutexGuard<'_, SessionTracker> {
     state.lock().unwrap_or_else(PoisonError::into_inner)
-}
-
-fn handle_ranked_stats(data: &serde_json::Value, state: &SharedState) -> Option<String> {
-    let mut stats = serde_json::from_value::<RankedStats>(data.clone()).ok()?;
-    let current = stats.solo_queue_record()?;
-    stats.session = Some(lock_state(state).session(current));
-    serde_json::to_string(&stats).ok()
 }
 
 pub fn spawn_lcu_listener(outbox: Outbox) {
@@ -212,7 +352,10 @@ async fn refresh_matches_after_ranked_update(
 }
 
 fn update_account(state: &SharedState, summoner: &serde_json::Value) {
-    let new_id = SummonerId::from_summoner(summoner);
+    let new_id = parse::<LcuAccount>(summoner, SUMMONER_URI)
+        .inspect_err(log_data_error)
+        .ok()
+        .and_then(|account| account.summoner_id);
     if !lock_state(state).switch_account(new_id) {
         return;
     }
@@ -221,34 +364,46 @@ fn update_account(state: &SharedState, summoner: &serde_json::Value) {
 
 fn handle_lcu_event(payload: &EventData, outbox: &Outbox, state: &SharedState) {
     match payload.uri.as_str() {
-        RANKED_STATS_URI => push_ranked_stats(&payload.data, outbox, state),
-        SUMMONER_URI => push_raw(
-            &payload.data,
-            outbox,
-            Topic::Summoner,
-            "Pushing Summoner profile update",
-        ),
-        MATCH_HISTORY_URI => push_raw(
-            &payload.data,
-            outbox,
-            Topic::MatchHistory,
-            "Pushing Match History update",
-        ),
+        RANKED_STATS_URI => publish_ranked_stats(&payload.data, outbox, state),
+        SUMMONER_URI => publish_summoner(&payload.data, outbox),
+        MATCH_HISTORY_URI => publish_matches(&payload.data, outbox),
         _ => {}
     }
 }
 
-fn push_ranked_stats(data: &serde_json::Value, outbox: &Outbox, state: &SharedState) {
-    let Some(json) = handle_ranked_stats(data, state) else {
+fn publish_summoner(data: &serde_json::Value, outbox: &Outbox) {
+    let Ok(summoner) = parse::<LcuSummoner>(data, SUMMONER_URI).inspect_err(log_data_error) else {
         return;
     };
-    outbox.publish(Topic::RankedStats, json);
-    tracing::info!(target: "overlay_update", "Pushing Ranked Stats update");
+    publish(outbox, &summoner.into_message());
 }
 
-fn push_raw(data: &serde_json::Value, outbox: &Outbox, topic: Topic, log_message: &str) {
-    outbox.publish(topic, data.to_string());
-    tracing::info!(target: "overlay_update", "{}", log_message);
+fn publish_ranked_stats(data: &serde_json::Value, outbox: &Outbox, state: &SharedState) {
+    let Ok(stats) = parse::<LcuRankedStats>(data, RANKED_STATS_URI).inspect_err(log_data_error)
+    else {
+        return;
+    };
+    let Some(summary) = ranked_summary(&stats, RANKED_QUEUE, &mut lock_state(state)) else {
+        return;
+    };
+    publish(outbox, &OverlayMessage::Ranked(summary));
+}
+
+fn publish_matches(data: &serde_json::Value, outbox: &Outbox) {
+    let Ok(history) = parse::<LcuMatchHistory>(data, MATCH_HISTORY_URI).inspect_err(log_data_error)
+    else {
+        return;
+    };
+    let games = recent_games(&history, RANKED_QUEUE, MATCH_LIMIT);
+    publish(outbox, &OverlayMessage::Matches(games));
+}
+
+fn publish(outbox: &Outbox, message: &OverlayMessage) {
+    if let Err(err) = outbox.publish(message) {
+        tracing::error!(target: "overlay_update", "Cannot serialize the {} message: {}", message.name(), err);
+        return;
+    }
+    tracing::info!(target: "overlay_update", "Pushing {} update", message.name());
 }
 
 async fn send_initial_sync(source: &impl LcuSource, outbox: &Outbox, state: &SharedState) {
@@ -261,35 +416,21 @@ async fn sync_summoner(source: &impl LcuSource, outbox: &Outbox) {
     let Some(profile) = source.fetch(SUMMONER_URI).await else {
         return;
     };
-    push_raw(
-        &profile,
-        outbox,
-        Topic::Summoner,
-        "Initial Sync: Summoner Profile sent",
-    );
+    publish_summoner(&profile, outbox);
 }
 
 async fn sync_ranked_stats(source: &impl LcuSource, outbox: &Outbox, state: &SharedState) {
     let Some(stats) = source.fetch(RANKED_STATS_URI).await else {
         return;
     };
-    let Some(json) = handle_ranked_stats(&stats, state) else {
-        return;
-    };
-    outbox.publish(Topic::RankedStats, json);
-    tracing::info!(target: "overlay_update", "Initial Sync: Ranked Stats sent");
+    publish_ranked_stats(&stats, outbox, state);
 }
 
 async fn sync_recent_matches(source: &impl LcuSource, outbox: &Outbox) {
     let Some(matches) = source.fetch(MATCH_HISTORY_URI).await else {
         return;
     };
-    push_raw(
-        &matches,
-        outbox,
-        Topic::MatchHistory,
-        "Pushing Match History update",
-    );
+    publish_matches(&matches, outbox);
 }
 
 async fn wait_until_disconnected(source: &impl LcuSource) {
@@ -312,8 +453,16 @@ mod tests {
         include_str!("../tests/fixtures/ranked_stats_after_games.json");
     const RANKED_STATS_FLEX_ONLY: &str =
         include_str!("../tests/fixtures/ranked_stats_flex_only.json");
+    const RANKED_STATS_MASTER: &str = include_str!("../tests/fixtures/ranked_stats_master.json");
     const RANKED_STATS_NO_RECORD: &str =
         include_str!("../tests/fixtures/ranked_stats_no_record.json");
+
+    // The e2e tests feed these messages to the overlay. The contract tests below
+    // check that the backend sends the same messages for the LCU fixtures.
+    const E2E_SUMMONER: &str = include_str!("../e2e/fixtures/summoner.json");
+    const E2E_RANKED: &str = include_str!("../e2e/fixtures/ranked.json");
+    const E2E_RANKED_MASTER: &str = include_str!("../e2e/fixtures/ranked_master.json");
+    const E2E_MATCHES: &str = include_str!("../e2e/fixtures/matches.json");
 
     struct MockSource {
         responses: HashMap<&'static str, Value>,
@@ -421,6 +570,40 @@ mod tests {
         drain(&mut rx)
     }
 
+    fn message_json(message: &OverlayMessage) -> Value {
+        serde_json::to_value(message).expect("message serializes")
+    }
+
+    fn summoner_message(text: &str) -> OverlayMessage {
+        parse::<LcuSummoner>(&fixture(text), SUMMONER_URI)
+            .expect("summoner fixture parses")
+            .into_message()
+    }
+
+    fn ranked_from(text: &str, tracker: &mut SessionTracker) -> Option<RankedSummary> {
+        let stats = parse::<LcuRankedStats>(&fixture(text), RANKED_STATS_URI)
+            .expect("ranked fixture parses");
+        ranked_summary(&stats, RANKED_QUEUE, tracker)
+    }
+
+    fn history(text: &str) -> LcuMatchHistory {
+        parse(&fixture(text), MATCH_HISTORY_URI).expect("match fixture parses")
+    }
+
+    fn tracker_with_baseline(wins: i64, losses: i64) -> SessionTracker {
+        SessionTracker {
+            summoner_id: None,
+            baseline: Some(Record { wins, losses }),
+        }
+    }
+
+    fn game(champion_id: u32, result: MatchResult) -> MatchSummary {
+        MatchSummary {
+            champion_id: ChampionId(champion_id),
+            result,
+        }
+    }
+
     #[tokio::test(start_paused = true)]
     async fn cycle_returns_when_client_not_running() {
         let messages = run_cycle(&mut MockSource::not_running(), &new_state()).await;
@@ -435,10 +618,13 @@ mod tests {
         let messages = run_cycle(&mut source, &new_state()).await;
 
         assert_eq!(messages.len(), 3);
-        assert_eq!(messages[0], fixture(SUMMONER));
-        assert_eq!(messages[1]["queues"], fixture(RANKED_STATS)["queues"]);
-        assert_eq!(messages[1]["session"], json!({"wins": 0, "losses": 0}));
-        assert_eq!(messages[2], fixture(MATCHES));
+        assert_eq!(messages[0], message_json(&summoner_message(SUMMONER)));
+        assert_eq!(messages[1]["type"], "ranked");
+        assert_eq!(
+            messages[1]["data"]["session"],
+            json!({"wins": 0, "losses": 0})
+        );
+        assert_eq!(messages[2]["type"], "matches");
     }
 
     #[tokio::test(start_paused = true)]
@@ -475,7 +661,10 @@ mod tests {
         run_cycle(&mut first, &state).await;
         let messages = run_cycle(&mut second, &state).await;
 
-        assert_eq!(messages[1]["session"], json!({"wins": 2, "losses": 1}));
+        assert_eq!(
+            messages[1]["data"]["session"],
+            json!({"wins": 2, "losses": 1})
+        );
     }
 
     #[tokio::test(start_paused = true)]
@@ -487,45 +676,182 @@ mod tests {
         run_cycle(&mut first, &state).await;
         let messages = run_cycle(&mut second, &state).await;
 
-        assert_eq!(messages[1]["session"], json!({"wins": 0, "losses": 0}));
+        assert_eq!(
+            messages[1]["data"]["session"],
+            json!({"wins": 0, "losses": 0})
+        );
     }
 
-    fn ranked_json(text: &str, state: &SharedState) -> Option<Value> {
-        let json = handle_ranked_stats(&fixture(text), state)?;
-        Some(serde_json::from_str(&json).expect("ranked stats output is valid JSON"))
+    #[test]
+    fn summoner_keeps_only_the_riot_id() {
+        assert_eq!(
+            summoner_message(SUMMONER),
+            OverlayMessage::Summoner(RiotId {
+                game_name: "PlayerOne".to_string(),
+                tag_line: Some("EUW".to_string()),
+            })
+        );
+    }
+
+    #[test]
+    fn summoner_without_tag_line_has_no_tag_line() {
+        let mut summoner = fixture(SUMMONER);
+        summoner["tagLine"] = Value::Null;
+
+        let message = parse::<LcuSummoner>(&summoner, SUMMONER_URI)
+            .expect("summoner parses")
+            .into_message();
+
+        assert_eq!(
+            message_json(&message)["data"],
+            json!({"gameName": "PlayerOne"})
+        );
+    }
+
+    #[test]
+    fn invalid_summoner_names_the_uri() {
+        let err = parse::<LcuSummoner>(&json!({"tagLine": "EUW"}), SUMMONER_URI)
+            .err()
+            .expect("summoner without game name fails");
+
+        assert!(err.to_string().contains(SUMMONER_URI));
     }
 
     #[test]
     fn first_ranked_payload_sets_baseline() {
-        let stats = ranked_json(RANKED_STATS, &new_state()).expect("solo queue present");
+        let summary = ranked_from(RANKED_STATS, &mut SessionTracker::default());
 
-        assert_eq!(stats["session"], json!({"wins": 0, "losses": 0}));
-        assert_eq!(stats["queues"], fixture(RANKED_STATS)["queues"]);
+        assert_eq!(
+            summary,
+            Some(RankedSummary {
+                tier: Tier("GOLD".to_string()),
+                division: Some(Division::Two),
+                league_points: 57,
+                season: Record {
+                    wins: 34,
+                    losses: 29
+                },
+                session: Record { wins: 0, losses: 0 },
+            })
+        );
+    }
+
+    #[test]
+    fn apex_tier_has_no_division() {
+        let summary = ranked_from(RANKED_STATS_MASTER, &mut SessionTracker::default())
+            .expect("solo queue present");
+
+        assert_eq!(summary.division, None);
     }
 
     #[test]
     fn later_ranked_payload_reports_deltas() {
-        let state = new_state();
+        let mut tracker = SessionTracker::default();
 
-        ranked_json(RANKED_STATS, &state);
-        let stats = ranked_json(RANKED_STATS_AFTER_GAMES, &state).expect("solo queue present");
+        ranked_from(RANKED_STATS, &mut tracker);
+        let summary =
+            ranked_from(RANKED_STATS_AFTER_GAMES, &mut tracker).expect("solo queue present");
 
-        assert_eq!(stats["session"], json!({"wins": 2, "losses": 1}));
+        assert_eq!(summary.session, Record { wins: 2, losses: 1 });
     }
 
     #[test]
     fn ranked_payload_without_solo_queue_is_ignored() {
-        assert_eq!(ranked_json(RANKED_STATS_FLEX_ONLY, &new_state()), None);
+        assert_eq!(
+            ranked_from(RANKED_STATS_FLEX_ONLY, &mut SessionTracker::default()),
+            None
+        );
     }
 
     #[test]
     fn missing_wins_and_losses_count_as_zero() {
-        let state = new_state();
+        let mut tracker = SessionTracker::default();
 
-        ranked_json(RANKED_STATS_NO_RECORD, &state);
-        let stats = ranked_json(RANKED_STATS, &state).expect("solo queue present");
+        ranked_from(RANKED_STATS_NO_RECORD, &mut tracker);
+        let summary = ranked_from(RANKED_STATS, &mut tracker).expect("solo queue present");
 
-        assert_eq!(stats["session"], json!({"wins": 34, "losses": 29}));
+        assert_eq!(
+            summary.session,
+            Record {
+                wins: 34,
+                losses: 29
+            }
+        );
+    }
+
+    #[test]
+    fn match_history_keeps_recent_solo_queue_games() {
+        let games = recent_games(&history(MATCHES), RANKED_QUEUE, MATCH_LIMIT);
+
+        assert_eq!(
+            games,
+            [
+                game(103, MatchResult::Win),
+                game(222, MatchResult::Loss),
+                game(157, MatchResult::Remake),
+                game(64, MatchResult::Win),
+                game(25, MatchResult::Loss),
+            ]
+        );
+    }
+
+    #[test]
+    fn match_history_respects_the_limit() {
+        let games = recent_games(&history(MATCHES), RANKED_QUEUE, 2);
+
+        assert_eq!(games.len(), 2);
+    }
+
+    #[test]
+    fn game_without_participants_is_skipped() {
+        let mut matches = fixture(MATCHES);
+        matches["games"]["games"][0]["participants"] = json!([]);
+        let history: LcuMatchHistory =
+            parse(&matches, MATCH_HISTORY_URI).expect("match history parses");
+
+        let games = recent_games(&history, RANKED_QUEUE, MATCH_LIMIT);
+
+        assert_eq!(games[0], game(222, MatchResult::Loss));
+    }
+
+    #[test]
+    fn summoner_message_matches_e2e_fixture() {
+        assert_eq!(
+            message_json(&summoner_message(SUMMONER)),
+            fixture(E2E_SUMMONER)
+        );
+    }
+
+    #[test]
+    fn ranked_message_matches_e2e_fixture() {
+        let summary = ranked_from(RANKED_STATS, &mut tracker_with_baseline(32, 28))
+            .expect("solo queue present");
+
+        assert_eq!(
+            message_json(&OverlayMessage::Ranked(summary)),
+            fixture(E2E_RANKED)
+        );
+    }
+
+    #[test]
+    fn apex_ranked_message_matches_e2e_fixture() {
+        let summary = ranked_from(RANKED_STATS_MASTER, &mut SessionTracker::default())
+            .expect("solo queue present");
+
+        assert_eq!(
+            message_json(&OverlayMessage::Ranked(summary)),
+            fixture(E2E_RANKED_MASTER)
+        );
+    }
+
+    #[test]
+    fn matches_message_matches_e2e_fixture() {
+        let games = recent_games(&history(MATCHES), RANKED_QUEUE, MATCH_LIMIT);
+
+        assert_eq!(
+            message_json(&OverlayMessage::Matches(games)),
+            fixture(E2E_MATCHES)
+        );
     }
 
     #[test]
@@ -579,8 +905,12 @@ mod tests {
         let messages = run_cycle(&mut source, &new_state()).await;
 
         assert_eq!(messages.len(), 5);
-        assert_eq!(messages[3]["session"], json!({"wins": 2, "losses": 1}));
-        assert_eq!(messages[4], fixture(MATCHES));
+        assert_eq!(
+            messages[3]["data"]["session"],
+            json!({"wins": 2, "losses": 1})
+        );
+        assert_eq!(messages[4], messages[2]);
+        assert_eq!(messages[4]["type"], "matches");
     }
 
     #[tokio::test(start_paused = true)]
@@ -592,6 +922,7 @@ mod tests {
         let messages = run_cycle(&mut source, &new_state()).await;
 
         assert_eq!(messages.len(), 4);
-        assert_eq!(messages[3], fixture(SUMMONER));
+        assert_eq!(messages[3], messages[0]);
+        assert_eq!(messages[3]["type"], "summoner");
     }
 }

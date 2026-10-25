@@ -100,7 +100,8 @@ async fn handle_message(session: &mut Session, msg: Message) -> Flow {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::snapshot::{Outbox, Topic};
+    use crate::snapshot::Outbox;
+    use crate::snapshot::test_messages::{json, matches, publish, ranked, summoner};
 
     #[test]
     fn received_message_is_forwarded() {
@@ -125,9 +126,9 @@ mod tests {
     async fn lagged_client_receives_snapshot() {
         let outbox = Outbox::new(1);
         let mut receiver = outbox.subscribe();
-        outbox.publish(Topic::Summoner, "summoner".to_string());
-        outbox.publish(Topic::RankedStats, "ranked".to_string());
-        outbox.publish(Topic::MatchHistory, "matches".to_string());
+        publish(&outbox, &summoner("PlayerOne"));
+        publish(&outbox, &ranked(10));
+        publish(&outbox, &matches());
 
         let received = receiver.recv().await;
         let messages = next_messages(received, &outbox.snapshot());
@@ -135,9 +136,9 @@ mod tests {
         assert_eq!(
             messages,
             Some(vec![
-                "summoner".to_string(),
-                "ranked".to_string(),
-                "matches".to_string()
+                json(&summoner("PlayerOne")),
+                json(&ranked(10)),
+                json(&matches())
             ])
         );
     }

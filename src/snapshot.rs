@@ -1,35 +1,29 @@
+use crate::message::OverlayMessage;
 use std::sync::{Arc, PoisonError, RwLock};
 use tokio::sync::broadcast;
-
-#[derive(Clone, Copy, Debug)]
-pub enum Topic {
-    Summoner,
-    RankedStats,
-    MatchHistory,
-}
 
 #[derive(Default)]
 struct Snapshot {
     summoner: Option<String>,
-    ranked_stats: Option<String>,
-    match_history: Option<String>,
+    ranked: Option<String>,
+    matches: Option<String>,
 }
 
 impl Snapshot {
-    fn set(&mut self, topic: Topic, json: String) {
-        *self.slot(topic) = Some(json);
+    fn set(&mut self, message: &OverlayMessage, json: String) {
+        *self.slot(message) = Some(json);
     }
 
-    fn slot(&mut self, topic: Topic) -> &mut Option<String> {
-        match topic {
-            Topic::Summoner => &mut self.summoner,
-            Topic::RankedStats => &mut self.ranked_stats,
-            Topic::MatchHistory => &mut self.match_history,
+    fn slot(&mut self, message: &OverlayMessage) -> &mut Option<String> {
+        match message {
+            OverlayMessage::Summoner(_) => &mut self.summoner,
+            OverlayMessage::Ranked(_) => &mut self.ranked,
+            OverlayMessage::Matches(_) => &mut self.matches,
         }
     }
 
     fn messages(&self) -> Vec<String> {
-        [&self.summoner, &self.ranked_stats, &self.match_history]
+        [&self.summoner, &self.ranked, &self.matches]
             .into_iter()
             .flatten()
             .cloned()
@@ -48,11 +42,11 @@ impl SharedSnapshot {
             .messages()
     }
 
-    fn set(&self, topic: Topic, json: String) {
+    fn set(&self, message: &OverlayMessage, json: String) {
         self.0
             .write()
             .unwrap_or_else(PoisonError::into_inner)
-            .set(topic, json);
+            .set(message, json);
     }
 }
 
@@ -73,9 +67,11 @@ impl Outbox {
 
     // The snapshot is updated first: a client that subscribes between both steps
     // gets the message twice instead of missing it.
-    pub fn publish(&self, topic: Topic, json: String) {
-        self.snapshot.set(topic, json.clone());
+    pub fn publish(&self, message: &OverlayMessage) -> Result<(), serde_json::Error> {
+        let json = serde_json::to_string(message)?;
+        self.snapshot.set(message, json.clone());
         let _ = self.tx.send(json);
+        Ok(())
     }
 
     pub fn subscribe(&self) -> broadcast::Receiver<String> {
@@ -88,36 +84,78 @@ impl Outbox {
 }
 
 #[cfg(test)]
+pub mod test_messages {
+    use crate::message::{OverlayMessage, RankedSummary, Record, RiotId, Tier};
+
+    pub fn summoner(name: &str) -> OverlayMessage {
+        OverlayMessage::Summoner(RiotId {
+            game_name: name.to_string(),
+            tag_line: None,
+        })
+    }
+
+    pub fn ranked(league_points: i64) -> OverlayMessage {
+        OverlayMessage::Ranked(RankedSummary {
+            tier: Tier("GOLD".to_string()),
+            division: None,
+            league_points,
+            season: Record { wins: 0, losses: 0 },
+            session: Record { wins: 0, losses: 0 },
+        })
+    }
+
+    pub fn matches() -> OverlayMessage {
+        OverlayMessage::Matches(Vec::new())
+    }
+
+    pub fn json(message: &OverlayMessage) -> String {
+        serde_json::to_string(message).expect("message serializes")
+    }
+
+    pub fn publish(outbox: &super::Outbox, message: &OverlayMessage) {
+        outbox.publish(message).expect("message serializes");
+    }
+}
+
+#[cfg(test)]
 mod tests {
+    use super::test_messages::{json, matches, publish, ranked, summoner};
     use super::*;
 
     #[test]
     fn new_client_receives_full_snapshot_in_order() {
         let outbox = Outbox::new(8);
-        outbox.publish(Topic::MatchHistory, "matches".to_string());
-        outbox.publish(Topic::RankedStats, "ranked".to_string());
-        outbox.publish(Topic::Summoner, "summoner".to_string());
+        publish(&outbox, &matches());
+        publish(&outbox, &ranked(10));
+        publish(&outbox, &summoner("PlayerOne"));
 
         let messages = outbox.snapshot().messages();
 
-        assert_eq!(messages, ["summoner", "ranked", "matches"]);
+        assert_eq!(
+            messages,
+            [
+                json(&summoner("PlayerOne")),
+                json(&ranked(10)),
+                json(&matches())
+            ]
+        );
     }
 
     #[test]
     fn snapshot_skips_empty_topics() {
         let outbox = Outbox::new(8);
-        outbox.publish(Topic::RankedStats, "ranked".to_string());
+        publish(&outbox, &ranked(10));
 
-        assert_eq!(outbox.snapshot().messages(), ["ranked"]);
+        assert_eq!(outbox.snapshot().messages(), [json(&ranked(10))]);
     }
 
     #[test]
     fn snapshot_keeps_latest_message_per_topic() {
         let outbox = Outbox::new(8);
-        outbox.publish(Topic::RankedStats, "old".to_string());
-        outbox.publish(Topic::RankedStats, "new".to_string());
+        publish(&outbox, &ranked(10));
+        publish(&outbox, &ranked(20));
 
-        assert_eq!(outbox.snapshot().messages(), ["new"]);
+        assert_eq!(outbox.snapshot().messages(), [json(&ranked(20))]);
     }
 
     #[test]
@@ -125,8 +163,8 @@ mod tests {
         let outbox = Outbox::new(8);
         let mut rx = outbox.subscribe();
 
-        outbox.publish(Topic::Summoner, "summoner".to_string());
+        publish(&outbox, &summoner("PlayerOne"));
 
-        assert_eq!(rx.try_recv().ok().as_deref(), Some("summoner"));
+        assert_eq!(rx.try_recv().ok(), Some(json(&summoner("PlayerOne"))));
     }
 }

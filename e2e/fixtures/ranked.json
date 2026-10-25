@@ -1,0 +1,14 @@
+{
+  "type": "ranked",
+  "data": {
+    "tier": "GOLD",
+    "division": "II",
+    "leaguePoints": 57,
+    "wins": 34,
+    "losses": 29,
+    "session": {
+      "wins": 2,
+      "losses": 1
+    }
+  }
+}

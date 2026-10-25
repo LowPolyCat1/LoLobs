@@ -12,7 +12,7 @@ const PNG_1X1 = Buffer.from(
 );
 
 function loadFixture(name) {
-  const file = path.join(REPO_ROOT, 'tests', 'fixtures', `${name}.json`);
+  const file = path.join(REPO_ROOT, 'e2e', 'fixtures', `${name}.json`);
   return JSON.parse(fs.readFileSync(file, 'utf8'));
 }
 

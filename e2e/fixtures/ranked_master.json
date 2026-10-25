@@ -1,0 +1,13 @@
+{
+  "type": "ranked",
+  "data": {
+    "tier": "MASTER",
+    "leaguePoints": 213,
+    "wins": 162,
+    "losses": 141,
+    "session": {
+      "wins": 0,
+      "losses": 0
+    }
+  }
+}

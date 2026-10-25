@@ -1,10 +1,7 @@
 const { test, expect, loadFixture, pageUrl } = require('./overlay-fixture');
 
-function withSoloRecord(stats, wins, losses) {
-  const queues = stats.queues.map((q) =>
-    q.queueType === 'RANKED_SOLO_5x5' ? { ...q, wins, losses } : q,
-  );
-  return { ...stats, queues };
+function withSeasonRecord(ranked, wins, losses) {
+  return { ...ranked, data: { ...ranked.data, wins, losses } };
 }
 
 test.beforeEach(async ({ page, backend }) => {
@@ -13,7 +10,7 @@ test.beforeEach(async ({ page, backend }) => {
 });
 
 test('renders the solo queue record and win rate', async ({ page, backend }) => {
-  await backend.send(loadFixture('ranked_stats'));
+  await backend.send(loadFixture('ranked'));
 
   await expect(page.locator('#wins')).toHaveText('34');
   await expect(page.locator('#losses')).toHaveText('29');
@@ -22,7 +19,7 @@ test('renders the solo queue record and win rate', async ({ page, backend }) => 
 });
 
 test('renders 0.0% when no solo queue games are played', async ({ page, backend }) => {
-  await backend.send(withSoloRecord(loadFixture('ranked_stats'), 0, 0));
+  await backend.send(withSeasonRecord(loadFixture('ranked'), 0, 0));
 
   await expect(page.locator('#wins')).toHaveText('0');
   await expect(page.locator('#losses')).toHaveText('0');
