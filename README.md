@@ -167,6 +167,7 @@ Before you make a commit, do these checks:
    ```bash
    cd e2e
    npm ci
+   npx playwright install chromium
    npx playwright test
    ```
 
