@@ -21,6 +21,7 @@ jobs:
           New-Item -ItemType Directory -Path package | Out-Null
           Copy-Item target/release/LoLobs.exe package/
           Copy-Item -Recurse web package/web
+          Copy-Item config.example.toml package/
           Compress-Archive -Path package/* -DestinationPath "LoLobs-${{ github.ref_name }}-windows.zip"
       - uses: softprops/action-gh-release@v2
         with:

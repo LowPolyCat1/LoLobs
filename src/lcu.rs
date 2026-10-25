@@ -1,3 +1,4 @@
+use crate::config::{MatchLimit, Queue};
 use crate::message::{
     ChampionId, Division, MatchResult, MatchSummary, OverlayMessage, RankedSummary, Record, RiotId,
     Tier,
@@ -21,11 +22,6 @@ const SUMMONER_URI: &str = "/lol-summoner/v1/current-summoner";
 const RANKED_STATS_URI: &str = "/lol-ranked/v1/current-ranked-stats";
 const MATCH_HISTORY_URI: &str = "/lol-match-history/v1/products/lol/current-summoner/matches";
 const RETRY_DELAY: Duration = Duration::from_secs(5);
-const RANKED_QUEUE: RankedQueue = RankedQueue {
-    queue_type: "RANKED_SOLO_5x5",
-    queue_id: QueueId(420),
-};
-const MATCH_LIMIT: usize = 5;
 
 #[derive(Deserialize, Clone, Copy, Debug, PartialEq, Eq)]
 #[serde(transparent)]
@@ -40,6 +36,37 @@ struct QueueId(u32);
 struct RankedQueue {
     queue_type: &'static str,
     queue_id: QueueId,
+}
+
+impl RankedQueue {
+    const fn from_config(queue: Queue) -> Self {
+        match queue {
+            Queue::Solo => Self {
+                queue_type: "RANKED_SOLO_5x5",
+                queue_id: QueueId(420),
+            },
+            Queue::Flex => Self {
+                queue_type: "RANKED_FLEX_SR",
+                queue_id: QueueId(440),
+            },
+        }
+    }
+}
+
+/// The data that the overlay shows: the queue and the number of recent games.
+#[derive(Clone, Copy, Debug)]
+pub struct Selection {
+    queue: RankedQueue,
+    match_limit: MatchLimit,
+}
+
+impl Selection {
+    pub const fn new(queue: Queue, match_limit: MatchLimit) -> Self {
+        Self {
+            queue: RankedQueue::from_config(queue),
+            match_limit,
+        }
+    }
 }
 
 #[derive(Debug)]
@@ -193,14 +220,14 @@ impl LcuParticipantStats {
     }
 }
 
-fn recent_games(history: &LcuMatchHistory, queue: RankedQueue, limit: usize) -> Vec<MatchSummary> {
+fn recent_games(history: &LcuMatchHistory, selection: Selection) -> Vec<MatchSummary> {
     history
         .games
         .games
         .iter()
-        .filter(|game| game.queue_id == queue.queue_id)
+        .filter(|game| game.queue_id == selection.queue.queue_id)
         .filter_map(LcuGame::summary)
-        .take(limit)
+        .take(selection.match_limit.get())
         .collect()
 }
 
@@ -279,27 +306,32 @@ fn lock_state(state: &SharedState) -> MutexGuard<'_, SessionTracker> {
     state.lock().unwrap_or_else(PoisonError::into_inner)
 }
 
-pub fn spawn_lcu_listener(outbox: Outbox) {
+pub fn spawn_lcu_listener(outbox: Outbox, selection: Selection) {
     let state = Arc::new(Mutex::new(SessionTracker::default()));
 
     tokio::spawn(async move {
         tracing::info!("LCU Listener task spawned. Searching for active League client...");
 
         loop {
-            run_irelia_cycle(&outbox, &state).await;
+            run_irelia_cycle(&outbox, &state, selection).await;
             tokio::time::sleep(RETRY_DELAY).await;
         }
     });
 }
 
-async fn run_irelia_cycle(outbox: &Outbox, state: &SharedState) {
+async fn run_irelia_cycle(outbox: &Outbox, state: &SharedState, selection: Selection) {
     let Some(mut source) = IreliaSource::connect() else {
         return;
     };
-    run_listener_cycle(&mut source, outbox, state).await;
+    run_listener_cycle(&mut source, outbox, state, selection).await;
 }
 
-async fn run_listener_cycle(source: &mut impl LcuSource, outbox: &Outbox, state: &SharedState) {
+async fn run_listener_cycle(
+    source: &mut impl LcuSource,
+    outbox: &Outbox,
+    state: &SharedState,
+    selection: Selection,
+) {
     let Some(summoner) = source.fetch(SUMMONER_URI).await else {
         return;
     };
@@ -319,13 +351,13 @@ async fn run_listener_cycle(source: &mut impl LcuSource, outbox: &Outbox, state:
 
     tracing::info!(target: "lcu_monitor", "Connected to LCU WebSocket.");
 
-    send_initial_sync(source, outbox, state).await;
+    send_initial_sync(source, outbox, state, selection).await;
 
     // A closed event channel only means that the LCU socket stopped. The cycle still
     // ends only when the client is gone.
     tokio::select! {
         () = wait_until_disconnected(source) => {}
-        () = process_events(source, events, outbox, state) => wait_until_disconnected(source).await,
+        () = process_events(source, events, outbox, state, selection) => wait_until_disconnected(source).await,
     }
 
     tracing::warn!(target: "lcu_monitor", "LCU connection lost. Retrying...");
@@ -336,10 +368,11 @@ async fn process_events(
     mut events: mpsc::UnboundedReceiver<EventData>,
     outbox: &Outbox,
     state: &SharedState,
+    selection: Selection,
 ) {
     while let Some(event) = events.recv().await {
-        handle_lcu_event(&event, outbox, state);
-        refresh_matches_after_ranked_update(source, &event, outbox).await;
+        handle_lcu_event(&event, outbox, state, selection);
+        refresh_matches_after_ranked_update(source, &event, outbox, selection).await;
     }
 }
 
@@ -347,11 +380,12 @@ async fn refresh_matches_after_ranked_update(
     source: &impl LcuSource,
     event: &EventData,
     outbox: &Outbox,
+    selection: Selection,
 ) {
     if event.uri != RANKED_STATS_URI {
         return;
     }
-    sync_recent_matches(source, outbox).await;
+    sync_recent_matches(source, outbox, selection).await;
 }
 
 fn update_account(state: &SharedState, summoner: &serde_json::Value) {
@@ -365,11 +399,16 @@ fn update_account(state: &SharedState, summoner: &serde_json::Value) {
     tracing::info!(target: "lcu_monitor", "Account detected: ID {:?}", new_id);
 }
 
-fn handle_lcu_event(payload: &EventData, outbox: &Outbox, state: &SharedState) {
+fn handle_lcu_event(
+    payload: &EventData,
+    outbox: &Outbox,
+    state: &SharedState,
+    selection: Selection,
+) {
     match payload.uri.as_str() {
-        RANKED_STATS_URI => publish_ranked_stats(&payload.data, outbox, state),
+        RANKED_STATS_URI => publish_ranked_stats(&payload.data, outbox, state, selection),
         SUMMONER_URI => publish_summoner(&payload.data, outbox),
-        MATCH_HISTORY_URI => publish_matches(&payload.data, outbox),
+        MATCH_HISTORY_URI => publish_matches(&payload.data, outbox, selection),
         _ => {}
     }
 }
@@ -381,23 +420,28 @@ fn publish_summoner(data: &serde_json::Value, outbox: &Outbox) {
     publish(outbox, &summoner.into_message());
 }
 
-fn publish_ranked_stats(data: &serde_json::Value, outbox: &Outbox, state: &SharedState) {
+fn publish_ranked_stats(
+    data: &serde_json::Value,
+    outbox: &Outbox,
+    state: &SharedState,
+    selection: Selection,
+) {
     let Ok(stats) = parse::<LcuRankedStats>(data, RANKED_STATS_URI).inspect_err(log_data_error)
     else {
         return;
     };
-    let Some(summary) = ranked_summary(&stats, RANKED_QUEUE, &mut lock_state(state)) else {
+    let Some(summary) = ranked_summary(&stats, selection.queue, &mut lock_state(state)) else {
         return;
     };
     publish(outbox, &OverlayMessage::Ranked(summary));
 }
 
-fn publish_matches(data: &serde_json::Value, outbox: &Outbox) {
+fn publish_matches(data: &serde_json::Value, outbox: &Outbox, selection: Selection) {
     let Ok(history) = parse::<LcuMatchHistory>(data, MATCH_HISTORY_URI).inspect_err(log_data_error)
     else {
         return;
     };
-    let games = recent_games(&history, RANKED_QUEUE, MATCH_LIMIT);
+    let games = recent_games(&history, selection);
     publish(outbox, &OverlayMessage::Matches(games));
 }
 
@@ -409,10 +453,15 @@ fn publish(outbox: &Outbox, message: &OverlayMessage) {
     tracing::info!(target: "overlay_update", "Pushing {} update", message.name());
 }
 
-async fn send_initial_sync(source: &impl LcuSource, outbox: &Outbox, state: &SharedState) {
+async fn send_initial_sync(
+    source: &impl LcuSource,
+    outbox: &Outbox,
+    state: &SharedState,
+    selection: Selection,
+) {
     sync_summoner(source, outbox).await;
-    sync_ranked_stats(source, outbox, state).await;
-    sync_recent_matches(source, outbox).await;
+    sync_ranked_stats(source, outbox, state, selection).await;
+    sync_recent_matches(source, outbox, selection).await;
 }
 
 async fn sync_summoner(source: &impl LcuSource, outbox: &Outbox) {
@@ -422,18 +471,23 @@ async fn sync_summoner(source: &impl LcuSource, outbox: &Outbox) {
     publish_summoner(&profile, outbox);
 }
 
-async fn sync_ranked_stats(source: &impl LcuSource, outbox: &Outbox, state: &SharedState) {
+async fn sync_ranked_stats(
+    source: &impl LcuSource,
+    outbox: &Outbox,
+    state: &SharedState,
+    selection: Selection,
+) {
     let Some(stats) = source.fetch(RANKED_STATS_URI).await else {
         return;
     };
-    publish_ranked_stats(&stats, outbox, state);
+    publish_ranked_stats(&stats, outbox, state, selection);
 }
 
-async fn sync_recent_matches(source: &impl LcuSource, outbox: &Outbox) {
+async fn sync_recent_matches(source: &impl LcuSource, outbox: &Outbox, selection: Selection) {
     let Some(matches) = source.fetch(MATCH_HISTORY_URI).await else {
         return;
     };
-    publish_matches(&matches, outbox);
+    publish_matches(&matches, outbox, selection);
 }
 
 async fn wait_until_disconnected(source: &impl LcuSource) {
@@ -546,6 +600,12 @@ mod tests {
         }
     }
 
+    const SOLO: Selection = Selection::new(Queue::Solo, MatchLimit::DEFAULT);
+
+    fn with_limit(queue: Queue, limit: u64) -> Selection {
+        Selection::new(queue, MatchLimit::try_from(limit).expect("limit is valid"))
+    }
+
     fn new_state() -> SharedState {
         Arc::new(Mutex::new(SessionTracker::default()))
     }
@@ -566,7 +626,7 @@ mod tests {
         outbox: &Outbox,
     ) -> Vec<Value> {
         let mut rx = outbox.subscribe();
-        let cycle = run_listener_cycle(source, outbox, state);
+        let cycle = run_listener_cycle(source, outbox, state, SOLO);
         tokio::time::timeout(Duration::from_secs(600), cycle)
             .await
             .expect("cycle ends after disconnect");
@@ -586,7 +646,7 @@ mod tests {
     fn ranked_from(text: &str, tracker: &mut SessionTracker) -> Option<RankedSummary> {
         let stats = parse::<LcuRankedStats>(&fixture(text), RANKED_STATS_URI)
             .expect("ranked fixture parses");
-        ranked_summary(&stats, RANKED_QUEUE, tracker)
+        ranked_summary(&stats, SOLO.queue, tracker)
     }
 
     fn history(text: &str) -> LcuMatchHistory {
@@ -767,6 +827,24 @@ mod tests {
     }
 
     #[test]
+    fn flex_queue_reads_the_flex_ranked_stats() {
+        let stats = parse::<LcuRankedStats>(&fixture(RANKED_STATS_FLEX_ONLY), RANKED_STATS_URI)
+            .expect("ranked fixture parses");
+        let flex = Selection::new(Queue::Flex, MatchLimit::DEFAULT);
+
+        let summary = ranked_summary(&stats, flex.queue, &mut SessionTracker::default());
+
+        assert_eq!(summary.map(|s| s.tier), Some(Tier("SILVER".to_string())));
+    }
+
+    #[test]
+    fn flex_queue_keeps_only_flex_games() {
+        let games = recent_games(&history(MATCHES), with_limit(Queue::Flex, 20));
+
+        assert_eq!(games, [game(81, MatchResult::Loss)]);
+    }
+
+    #[test]
     fn missing_wins_and_losses_count_as_zero() {
         let mut tracker = SessionTracker::default();
 
@@ -784,7 +862,7 @@ mod tests {
 
     #[test]
     fn match_history_keeps_recent_solo_queue_games() {
-        let games = recent_games(&history(MATCHES), RANKED_QUEUE, MATCH_LIMIT);
+        let games = recent_games(&history(MATCHES), SOLO);
 
         assert_eq!(
             games,
@@ -800,7 +878,7 @@ mod tests {
 
     #[test]
     fn match_history_respects_the_limit() {
-        let games = recent_games(&history(MATCHES), RANKED_QUEUE, 2);
+        let games = recent_games(&history(MATCHES), with_limit(Queue::Solo, 2));
 
         assert_eq!(games.len(), 2);
     }
@@ -812,7 +890,7 @@ mod tests {
         let history: LcuMatchHistory =
             parse(&matches, MATCH_HISTORY_URI).expect("match history parses");
 
-        let games = recent_games(&history, RANKED_QUEUE, MATCH_LIMIT);
+        let games = recent_games(&history, SOLO);
 
         assert_eq!(games[0], game(222, MatchResult::Loss));
     }
@@ -839,7 +917,7 @@ mod tests {
         let history: LcuMatchHistory =
             parse(&matches, MATCH_HISTORY_URI).expect("match history parses");
 
-        let games = recent_games(&history, RANKED_QUEUE, MATCH_LIMIT);
+        let games = recent_games(&history, SOLO);
 
         assert_eq!(games[0], game(103, MatchResult::Win));
     }
@@ -853,7 +931,7 @@ mod tests {
         let history: LcuMatchHistory =
             parse(&matches, MATCH_HISTORY_URI).expect("match history parses");
 
-        let games = recent_games(&history, RANKED_QUEUE, MATCH_LIMIT);
+        let games = recent_games(&history, SOLO);
 
         assert_eq!(games[1], game(222, MatchResult::Remake));
     }
@@ -896,7 +974,7 @@ mod tests {
 
     #[test]
     fn matches_message_matches_e2e_fixture() {
-        let games = recent_games(&history(MATCHES), RANKED_QUEUE, MATCH_LIMIT);
+        let games = recent_games(&history(MATCHES), SOLO);
 
         assert_eq!(
             message_json(&OverlayMessage::Matches(games)),

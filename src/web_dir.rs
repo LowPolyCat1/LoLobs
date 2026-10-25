@@ -1,5 +1,6 @@
 use actix_files::Files;
 use actix_web::web::ServiceConfig;
+use std::net::SocketAddr;
 use std::path::{Path, PathBuf};
 
 const WEB_DIR_NAME: &str = "web";
@@ -48,10 +49,10 @@ pub fn resolve() -> Option<PathBuf> {
     found
 }
 
-pub fn log_page_urls(web_dir: &Path, ip: &str, port: u16) {
+pub fn log_page_urls(web_dir: &Path, address: SocketAddr) {
     tracing::info!("Serving overlay files from {}", web_dir.display());
     for page in PAGES {
-        tracing::info!("Overlay page: http://{}:{}/{}", ip, port, page);
+        tracing::info!("Overlay page: http://{}/{}", address, page);
     }
 }
 

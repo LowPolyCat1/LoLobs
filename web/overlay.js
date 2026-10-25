@@ -1,13 +1,24 @@
-const socketUrl = 'ws://127.0.0.1:2009/ws';
+const fallbackSocketUrl = 'ws://127.0.0.1:2009/ws';
 const resultClasses = { win: 'win-border', loss: 'loss-border', remake: 'remake' };
 let socket;
+
+// A page opened as a local file has no server host, so it uses the default backend address.
+function socketUrl() {
+    const servedOverHttp = location.protocol === 'http:' || location.protocol === 'https:';
+    return servedOverHttp ? `ws://${location.host}/ws` : fallbackSocketUrl;
+}
+
+function matchLimit() {
+    const limit = Number.parseInt(new URLSearchParams(location.search).get('matches'), 10);
+    return limit > 0 ? limit : Infinity;
+}
 
 function renderMatches(games) {
     const container = document.getElementById('matches-container');
     if (!container) return;
 
     container.innerHTML = '';
-    games.forEach(game => {
+    games.slice(0, matchLimit()).forEach(game => {
         const img = document.createElement('img');
         // Using CommunityDragon for champion icons
         img.src = `https://raw.communitydragon.org/latest/plugins/rcp-be-lol-game-data/global/default/v1/champion-icons/${game.championId}.png`;
@@ -20,7 +31,7 @@ function renderSummoner(data) {
     const nameEl = document.getElementById('game-name');
     const tagEl = document.getElementById('tag-line');
     if (nameEl) nameEl.innerText = data.gameName;
-    if (tagEl) tagEl.innerText = `#${data.tagLine || 'NA1'}`;
+    if (tagEl) tagEl.innerText = data.tagLine ? `#${data.tagLine}` : '';
 }
 
 function renderRank(data) {
@@ -127,7 +138,7 @@ function handleMessage(msg) {
 
 function connect() {
     previousRank = null;
-    socket = new WebSocket(socketUrl);
+    socket = new WebSocket(socketUrl());
 
     socket.onopen = () => {
         console.log("%c CONNECTED TO RUST BACKEND ", "background: #222; color: #bada55");
