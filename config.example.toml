@@ -13,3 +13,7 @@ queue = "solo"
 
 # The maximum number of games in the match history, from 1 to 20.
 match_limit = 5
+
+# Save the session stats to session.json next to LoLobs.exe.
+# After a restart on the same day, the server continues the session of the same account.
+persist_session = true

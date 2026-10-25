@@ -1,6 +1,7 @@
 mod config;
 mod lcu;
 mod message;
+mod session;
 mod snapshot;
 mod web_dir;
 mod ws;
@@ -8,8 +9,10 @@ mod ws;
 use actix_web::{App, HttpRequest, HttpResponse, HttpServer, web};
 use clap::Parser;
 use config::{Config, Overrides};
+use session::SessionStore;
 use snapshot::Outbox;
 use std::net::SocketAddr;
+use std::path::Path;
 
 async fn ws_route(
     req: HttpRequest,
@@ -31,9 +34,8 @@ fn parse_command_line() -> Overrides {
     }
 }
 
-fn load_config(cli: Overrides) -> Config {
-    let exe_path = std::env::current_exe().ok();
-    config::load(exe_path.as_deref(), cli).unwrap_or_else(|err| {
+fn load_config(exe_path: Option<&Path>, cli: Overrides) -> Config {
+    config::load(exe_path, cli).unwrap_or_else(|err| {
         tracing::error!("{}", err);
         std::process::exit(1);
     })
@@ -43,7 +45,8 @@ fn load_config(cli: Overrides) -> Config {
 async fn main() -> std::io::Result<()> {
     tracing_subscriber::fmt().init();
 
-    let config = load_config(parse_command_line());
+    let exe_path = std::env::current_exe().ok();
+    let config = load_config(exe_path.as_deref(), parse_command_line());
     let address = SocketAddr::new(config.ip, config.port);
 
     if rustls::crypto::ring::default_provider()
@@ -59,6 +62,7 @@ async fn main() -> std::io::Result<()> {
     lcu::spawn_lcu_listener(
         outbox.clone(),
         lcu::Selection::new(config.queue, config.match_limit),
+        SessionStore::open(config.session, exe_path.as_deref()),
     );
 
     tracing::info!("Starting Overlay Server on {}", address);

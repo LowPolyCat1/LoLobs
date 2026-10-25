@@ -97,7 +97,8 @@ impl Division {
 }
 
 /// The position on the ranked ladder in LP, counted from IRON IV with 0 LP.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[derive(Serialize, Deserialize, Clone, Copy, Debug, PartialEq, Eq)]
+#[serde(transparent)]
 pub struct LadderPoints(i64);
 
 impl LadderPoints {
@@ -118,7 +119,7 @@ impl LadderPoints {
     }
 }
 
-#[derive(Serialize, Clone, Copy, Debug, PartialEq, Eq)]
+#[derive(Serialize, Deserialize, Clone, Copy, Debug, PartialEq, Eq)]
 pub struct Record {
     pub wins: i64,
     pub losses: i64,
