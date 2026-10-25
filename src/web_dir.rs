@@ -74,6 +74,8 @@ mod tests {
         let id = COUNTER.fetch_add(1, Ordering::SeqCst);
         let dir =
             std::env::temp_dir().join(format!("lolobs-web-dir-{}-{}", std::process::id(), id));
+        // A process ID can repeat between runs (always under wine), so a folder from an earlier run can exist.
+        let _ = std::fs::remove_dir_all(&dir);
         std::fs::create_dir_all(&dir).expect("create temp dir");
         dir
     }
