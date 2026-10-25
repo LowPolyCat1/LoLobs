@@ -16,8 +16,8 @@ function loadFixture(name) {
   return JSON.parse(fs.readFileSync(file, 'utf8'));
 }
 
-function pageUrl(htmlFile) {
-  return pathToFileURL(path.join(WEB_DIR, htmlFile)).href;
+function pageUrl(htmlFile, query = '') {
+  return pathToFileURL(path.join(WEB_DIR, htmlFile)).href + query;
 }
 
 // Records every WebSocket connection the overlay opens, so tests can push

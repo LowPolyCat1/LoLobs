@@ -21,12 +21,12 @@ test('renders the Riot ID from the summoner message', async ({ page, backend }) 
   await expect(page.locator('#tag-line')).toHaveText('#EUW');
 });
 
-test('shows NA1 when the summoner message has no tag line', async ({ page, backend }) => {
+test('shows no tag when the summoner message has no tag line', async ({ page, backend }) => {
   const summoner = loadFixture('summoner');
   await backend.send({ ...summoner, data: { gameName: summoner.data.gameName } });
 
   await expect(page.locator('#game-name')).toHaveText('PlayerOne');
-  await expect(page.locator('#tag-line')).toHaveText('#NA1');
+  await expect(page.locator('#tag-line')).toHaveText('');
 });
 
 test('renders tier, division and LP of the solo queue', async ({ page, backend }) => {

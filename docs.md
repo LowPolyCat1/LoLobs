@@ -135,12 +135,16 @@ This message gives the last games of the player in the configured queue. The `da
 
 The script `web/overlay.js` reads the `type` field of each message and updates the page:
 
-1. `summoner`: The script shows the Riot ID. When `tagLine` is not present, the script shows `#NA1`.
+1. `summoner`: The script shows the Riot ID. When `tagLine` is not present, the script shows no tag.
 2. `ranked`: The script shows the tier, the division and the LP. It loads the tier emblem from CommunityDragon.
    The script also calculates the win rate of the season and of the session with `wins / (wins + losses)`.
 3. `matches`: The script shows one champion icon for each game. The border color of the icon shows the result.
+   To show fewer games, add the `matches` parameter to the page URL, for example `past_matches.html?matches=3`.
 
 The script ignores messages with an unknown `type`.
+
+When the server sends the page, the script connects to the WebSocket of the same server.
+When you open the page as a local file, the script connects to `ws://127.0.0.1:2009/ws`.
 
 ### Visual States
 
