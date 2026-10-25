@@ -7,6 +7,7 @@ use serde::{Deserialize, Serialize};
 use std::future::Future;
 use std::sync::{Arc, Mutex, MutexGuard, PoisonError};
 use std::time::Duration;
+use tokio::sync::mpsc;
 
 type ConcreteLcuClient = irelia::rest::LcuClient<irelia::requests::RequestClientType>;
 
@@ -162,10 +163,11 @@ async fn run_listener_cycle(source: &mut impl LcuSource, outbox: &Outbox, state:
 
     update_account(state, &summoner);
 
-    let outbox_inner = outbox.clone();
-    let state_inner = Arc::clone(state);
+    // The irelia callback runs on its own thread without a tokio runtime, so events go
+    // through a channel to this task, which can make async LCU requests.
+    let (events_tx, events) = mpsc::unbounded_channel();
     let connection = source.subscribe(move |event| {
-        handle_lcu_event(event, &outbox_inner, &state_inner);
+        let _ = events_tx.send(event.clone());
     });
 
     if connection.is_none() {
@@ -175,9 +177,38 @@ async fn run_listener_cycle(source: &mut impl LcuSource, outbox: &Outbox, state:
     tracing::info!(target: "lcu_monitor", "Connected to LCU WebSocket.");
 
     send_initial_sync(source, outbox, state).await;
-    wait_until_disconnected(source).await;
+
+    // A closed event channel only means that the LCU socket stopped. The cycle still
+    // ends only when the client is gone.
+    tokio::select! {
+        () = wait_until_disconnected(source) => {}
+        () = process_events(source, events, outbox, state) => wait_until_disconnected(source).await,
+    }
 
     tracing::warn!(target: "lcu_monitor", "LCU connection lost. Retrying...");
+}
+
+async fn process_events(
+    source: &impl LcuSource,
+    mut events: mpsc::UnboundedReceiver<EventData>,
+    outbox: &Outbox,
+    state: &SharedState,
+) {
+    while let Some(event) = events.recv().await {
+        handle_lcu_event(&event, outbox, state);
+        refresh_matches_after_ranked_update(source, &event, outbox).await;
+    }
+}
+
+async fn refresh_matches_after_ranked_update(
+    source: &impl LcuSource,
+    event: &EventData,
+    outbox: &Outbox,
+) {
+    if event.uri != RANKED_STATS_URI {
+        return;
+    }
+    sync_recent_matches(source, outbox).await;
 }
 
 fn update_account(state: &SharedState, summoner: &serde_json::Value) {
@@ -312,6 +343,11 @@ mod tests {
             }
         }
 
+        fn with_events(mut self, events: Vec<EventData>) -> Self {
+            self.events = events;
+            self
+        }
+
         fn take_summoner_check(&self) -> bool {
             self.summoner_checks_left
                 .fetch_update(Ordering::SeqCst, Ordering::SeqCst, |n| n.checked_sub(1))
@@ -348,6 +384,14 @@ mod tests {
         stats["queues"][0]["wins"] = json!(wins);
         stats["queues"][0]["losses"] = json!(losses);
         stats
+    }
+
+    fn event(uri: &str, data: Value) -> EventData {
+        EventData {
+            data,
+            event_type: "Update".to_string(),
+            uri: uri.to_string(),
+        }
     }
 
     fn new_state() -> SharedState {
@@ -524,5 +568,30 @@ mod tests {
             }),
             Record { wins: 2, losses: 1 }
         );
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn ranked_update_event_refreshes_match_history() {
+        let ranked_event = event(RANKED_STATS_URI, fixture(RANKED_STATS_AFTER_GAMES));
+        let mut source = MockSource::running(fixture(SUMMONER), fixture(RANKED_STATS), 3)
+            .with_events(vec![ranked_event]);
+
+        let messages = run_cycle(&mut source, &new_state()).await;
+
+        assert_eq!(messages.len(), 5);
+        assert_eq!(messages[3]["session"], json!({"wins": 2, "losses": 1}));
+        assert_eq!(messages[4], fixture(MATCHES));
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn other_events_do_not_refresh_match_history() {
+        let summoner_event = event(SUMMONER_URI, fixture(SUMMONER));
+        let mut source = MockSource::running(fixture(SUMMONER), fixture(RANKED_STATS), 3)
+            .with_events(vec![summoner_event]);
+
+        let messages = run_cycle(&mut source, &new_state()).await;
+
+        assert_eq!(messages.len(), 4);
+        assert_eq!(messages[3], fixture(SUMMONER));
     }
 }
