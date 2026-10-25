@@ -55,8 +55,52 @@ function renderSession(session) {
     if (document.getElementById('s-wr')) document.getElementById('s-wr').innerText = `${sWr}%`;
 }
 
+const TIER_ORDER = ['IRON', 'BRONZE', 'SILVER', 'GOLD', 'PLATINUM', 'EMERALD', 'DIAMOND', 'MASTER', 'GRANDMASTER', 'CHALLENGER'];
+const DIVISION_ORDER = ['IV', 'III', 'II', 'I'];
+const RANK_CHANGE_CLASSES = { promotion: 'rank-promotion', demotion: 'rank-demotion' };
+// Null after each (re)connect, so that the initial state does not animate.
+let previousRank = null;
+
+// Apex tiers have no division, so they count as the lowest division of their tier.
+function rankValue(rank) {
+    const tierIndex = TIER_ORDER.indexOf(rank.tier);
+    if (tierIndex < 0) return null;
+    const divisionIndex = Math.max(DIVISION_ORDER.indexOf(rank.division), 0);
+    return tierIndex * DIVISION_ORDER.length + divisionIndex;
+}
+
+function rankChange(previous, next) {
+    if (!previous) return 'none';
+    const before = rankValue(previous);
+    const after = rankValue(next);
+    if (before === null || after === null || before === after) return 'none';
+    return after > before ? 'promotion' : 'demotion';
+}
+
+function clearRankAnimation(event) {
+    event.target.classList.remove(...Object.values(RANK_CHANGE_CLASSES));
+}
+
+function playRankAnimation(change) {
+    const icon = document.getElementById('rank-icon');
+    const className = RANK_CHANGE_CLASSES[change];
+    if (!icon || !className) return;
+    icon.classList.remove(...Object.values(RANK_CHANGE_CLASSES));
+    // Forces a reflow, so that the same class restarts its animation.
+    void icon.offsetWidth;
+    icon.addEventListener('animationend', clearRankAnimation);
+    icon.classList.add(className);
+}
+
+function animateRankChange(data) {
+    const change = rankChange(previousRank, data);
+    previousRank = { tier: data.tier, division: data.division };
+    playRankAnimation(change);
+}
+
 function renderRanked(data) {
     renderRank(data);
+    animateRankChange(data);
     renderSeason(data);
     renderSession(data.session);
 }
@@ -82,6 +126,7 @@ function handleMessage(msg) {
 }
 
 function connect() {
+    previousRank = null;
     socket = new WebSocket(socketUrl);
 
     socket.onopen = () => {

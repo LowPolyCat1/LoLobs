@@ -121,3 +121,10 @@ The script ignores messages with an unknown `type`.
 ### Visual States
 
 When the script receives a known message, it adds the `.visible` CSS class to the `.overlay-card` elements. This class starts the entry animation.
+
+When the rank goes up or down, the script adds a CSS class to `#rank-icon`. This class starts a short animation of the emblem:
+
+* `.rank-promotion`: The tier or the division goes up. The emblem grows and shows a gold glow for 1.2 seconds.
+* `.rank-demotion`: The tier or the division goes down. The emblem becomes dark and shakes for 0.8 seconds.
+
+The script removes the class at the end of the animation. A change of LP in the same division does not start an animation. After each connection, the first `ranked` message shows the current rank without an animation.
