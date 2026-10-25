@@ -1,4 +1,5 @@
 mod lcu;
+mod web_dir;
 mod ws;
 
 use actix_web::{App, HttpRequest, HttpResponse, HttpServer, web};
@@ -35,10 +36,16 @@ async fn main() -> std::io::Result<()> {
 
     tracing::info!("Starting Overlay Server on {}:{}", IP, PORT);
 
+    let web_dir = web_dir::resolve();
+    if let Some(dir) = &web_dir {
+        web_dir::log_page_urls(dir, IP, PORT);
+    }
+
     HttpServer::new(move || {
         App::new()
             .app_data(web::Data::new(Arc::clone(&tx_arc)))
             .route("/ws", web::get().to(ws_route))
+            .configure(|cfg| web_dir::configure(cfg, web_dir.as_deref()))
     })
     .workers(1)
     .bind((IP, PORT))?
