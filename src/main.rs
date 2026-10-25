@@ -1,9 +1,7 @@
-mod actor;
 mod lcu;
-mod messages;
+mod ws;
 
-use actix_web::{App, HttpRequest, HttpServer, Responder, web};
-use actix_web_actors::ws;
+use actix_web::{App, HttpRequest, HttpResponse, HttpServer, web};
 use std::sync::Arc;
 use tokio::sync::broadcast;
 
@@ -11,14 +9,8 @@ async fn ws_route(
     req: HttpRequest,
     stream: web::Payload,
     tx: web::Data<Arc<broadcast::Sender<String>>>,
-) -> impl Responder {
-    ws::start(
-        actor::MyWs {
-            receiver: tx.subscribe(),
-        },
-        &req,
-        stream,
-    )
+) -> Result<HttpResponse, actix_web::Error> {
+    ws::start(&req, stream, tx.subscribe())
 }
 
 const IP: &str = "127.0.0.1";
@@ -28,9 +20,13 @@ const PORT: u16 = 2009;
 async fn main() -> std::io::Result<()> {
     tracing_subscriber::fmt().init();
 
-    rustls::crypto::ring::default_provider()
+    if rustls::crypto::ring::default_provider()
         .install_default()
-        .expect("Failed to install rustls crypto provider");
+        .is_err()
+    {
+        tracing::error!("Failed to install the ring rustls crypto provider");
+        std::process::exit(1);
+    }
 
     let (tx, _) = broadcast::channel::<String>(32);
     let tx_arc = Arc::new(tx);
