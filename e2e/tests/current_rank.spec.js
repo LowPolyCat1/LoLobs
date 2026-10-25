@@ -43,3 +43,35 @@ test('renders an apex tier without the NA division', async ({ page, backend }) =
   await expect(page.locator('#tier')).toHaveText('MASTER');
   await expect(page.locator('#lp')).toHaveText('213 LP');
 });
+
+function withLpChange(ranked, lpChange) {
+  return { ...ranked, data: { ...ranked.data, lpChange } };
+}
+
+test('shows the LP gain of the last game in green', async ({ page, backend }) => {
+  await backend.send(loadFixture('ranked'));
+
+  const change = page.locator('#lp-change');
+  await expect(change).toBeVisible();
+  await expect(change).toHaveText('+21');
+  await expect(change).toHaveClass(/\bwin\b/);
+});
+
+test('shows the LP loss of the last game in red', async ({ page, backend }) => {
+  await backend.send(withLpChange(loadFixture('ranked'), { lastGame: -18, sessionTotal: 49 }));
+
+  const change = page.locator('#lp-change');
+  await expect(change).toHaveText('-18');
+  await expect(change).toHaveClass(/\bloss\b/);
+  await expect(change).not.toHaveClass(/\bwin\b/);
+});
+
+test('hides the LP change when no game was played', async ({ page, backend }) => {
+  await backend.send(loadFixture('ranked'));
+  await expect(page.locator('#lp-change')).toBeVisible();
+
+  await backend.send(loadFixture('ranked_master'));
+
+  await expect(page.locator('#lp')).toHaveText('213 LP');
+  await expect(page.locator('#lp-change')).toBeHidden();
+});

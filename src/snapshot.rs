@@ -101,6 +101,7 @@ pub mod test_messages {
             league_points,
             season: Record { wins: 0, losses: 0 },
             session: Record { wins: 0, losses: 0 },
+            lp_change: None,
         })
     }
 

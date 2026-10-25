@@ -47,6 +47,32 @@ function renderRank(data) {
     }
 }
 
+// Zero has no sign and keeps the default color.
+function setSignedValue(el, value, suffix) {
+    el.innerText = `${value > 0 ? '+' : ''}${value}${suffix}`;
+    el.classList.toggle('win', value > 0);
+    el.classList.toggle('loss', value < 0);
+}
+
+function renderLastGameLp(lpChange) {
+    const el = document.getElementById('lp-change');
+    if (!el) return;
+    const lastGame = lpChange ? lpChange.lastGame : undefined;
+    el.hidden = lastGame === undefined;
+    if (lastGame !== undefined) setSignedValue(el, lastGame, '');
+}
+
+function renderSessionLp(lpChange) {
+    const el = document.getElementById('s-lp');
+    if (!el) return;
+    if (lpChange) {
+        setSignedValue(el, lpChange.sessionTotal, ' LP');
+        return;
+    }
+    el.innerText = '-- LP';
+    el.classList.remove('win', 'loss');
+}
+
 function renderSeason(data) {
     if (!document.getElementById('wins')) return;
 
@@ -114,6 +140,8 @@ function renderRanked(data) {
     animateRankChange(data);
     renderSeason(data);
     renderSession(data.session);
+    renderLastGameLp(data.lpChange);
+    renderSessionLp(data.lpChange);
 }
 
 function handleMessage(msg) {

@@ -1,7 +1,7 @@
 use crate::config::{MatchLimit, Queue};
 use crate::message::{
-    ChampionId, Division, MatchResult, MatchSummary, OverlayMessage, RankedSummary, Record, RiotId,
-    Tier,
+    ChampionId, Division, LadderPoints, LpChange, MatchResult, MatchSummary, OverlayMessage,
+    RankedSummary, Record, RiotId, Tier,
 };
 use crate::snapshot::Outbox;
 use irelia::ws::{
@@ -154,13 +154,25 @@ impl LcuQueue {
         }
     }
 
-    fn summary(&self, session: Record) -> RankedSummary {
+    fn division(&self) -> Option<Division> {
+        self.division.as_deref().and_then(Division::from_lcu)
+    }
+
+    fn standing(&self) -> Standing {
+        Standing {
+            record: self.record(),
+            ladder: LadderPoints::new(&self.tier, self.division(), self.league_points),
+        }
+    }
+
+    fn summary(&self, progress: &SessionProgress) -> RankedSummary {
         RankedSummary {
             tier: self.tier.clone(),
-            division: self.division.as_deref().and_then(Division::from_lcu),
+            division: self.division(),
             league_points: self.league_points,
             season: self.record(),
-            session,
+            session: progress.session_record(),
+            lp_change: progress.lp_change(),
         }
     }
 }
@@ -231,10 +243,62 @@ fn recent_games(history: &LcuMatchHistory, selection: Selection) -> Vec<MatchSum
         .collect()
 }
 
+/// The record and the ladder position of the selected queue at one time.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+struct Standing {
+    record: Record,
+    /// Not present when the player has no rank on the ladder, for example during placement games.
+    ladder: Option<LadderPoints>,
+}
+
+impl Standing {
+    fn lp_since(self, earlier: Standing) -> Option<i64> {
+        Some(self.ladder?.since(earlier.ladder?))
+    }
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+struct SessionProgress {
+    baseline: Standing,
+    latest: Standing,
+    last_game: Option<i64>,
+}
+
+impl SessionProgress {
+    fn start(baseline: Standing) -> Self {
+        tracing::info!(target: "lcu_monitor", "New baseline established: {}W - {}L", baseline.record.wins, baseline.record.losses);
+        Self {
+            baseline,
+            latest: baseline,
+            last_game: None,
+        }
+    }
+
+    // An update without a new game, for example LP decay, keeps the LP change of the last game.
+    fn advance(&mut self, current: Standing) {
+        if current.record.games() > self.latest.record.games() {
+            self.last_game = current.lp_since(self.latest);
+        }
+        self.latest = current;
+    }
+
+    fn session_record(&self) -> Record {
+        self.latest.record.since(self.baseline.record)
+    }
+
+    fn lp_change(&self) -> Option<LpChange> {
+        let session_total = self.latest.lp_since(self.baseline)?;
+        Some(LpChange {
+            last_game: self.last_game,
+            session_total,
+        })
+    }
+}
+
 #[derive(Default)]
 struct SessionTracker {
     summoner_id: Option<SummonerId>,
-    baseline: Option<Record>,
+    progress: Option<SessionProgress>,
 }
 
 impl SessionTracker {
@@ -243,16 +307,16 @@ impl SessionTracker {
             return false;
         }
         self.summoner_id = id;
-        self.baseline = None;
+        self.progress = None;
         true
     }
 
-    fn session(&mut self, current: Record) -> Record {
-        let baseline = *self.baseline.get_or_insert_with(|| {
-            tracing::info!(target: "lcu_monitor", "New baseline established: {}W - {}L", current.wins, current.losses);
-            current
-        });
-        current.since(baseline)
+    fn update(&mut self, current: Standing) -> &SessionProgress {
+        let progress = self
+            .progress
+            .get_or_insert_with(|| SessionProgress::start(current));
+        progress.advance(current);
+        progress
     }
 }
 
@@ -262,8 +326,8 @@ fn ranked_summary(
     tracker: &mut SessionTracker,
 ) -> Option<RankedSummary> {
     let queue = stats.queue(queue)?;
-    let session = tracker.session(queue.record());
-    Some(queue.summary(session))
+    let progress = tracker.update(queue.standing());
+    Some(queue.summary(progress))
 }
 
 type SharedState = Arc<Mutex<SessionTracker>>;
@@ -653,10 +717,40 @@ mod tests {
         parse(&fixture(text), MATCH_HISTORY_URI).expect("match fixture parses")
     }
 
-    fn tracker_with_baseline(wins: i64, losses: i64) -> SessionTracker {
-        SessionTracker {
-            summoner_id: None,
-            baseline: Some(Record { wins, losses }),
+    fn ranked_with_rank(tier: &str, division: &str, league_points: i64, record: Record) -> Value {
+        let mut stats = ranked_with_record(record.wins, record.losses);
+        stats["queues"][0]["tier"] = json!(tier);
+        stats["queues"][0]["division"] = json!(division);
+        stats["queues"][0]["leaguePoints"] = json!(league_points);
+        stats
+    }
+
+    fn summary_of(stats: &Value, tracker: &mut SessionTracker) -> Option<RankedSummary> {
+        let stats = parse::<LcuRankedStats>(stats, RANKED_STATS_URI).expect("ranked stats parse");
+        ranked_summary(&stats, SOLO.queue, tracker)
+    }
+
+    fn lp_change_after(updates: &[Value]) -> Option<LpChange> {
+        let mut tracker = SessionTracker::default();
+        updates
+            .iter()
+            .filter_map(|stats| summary_of(stats, &mut tracker))
+            .last()
+            .and_then(|summary| summary.lp_change)
+    }
+
+    fn record(wins: i64, losses: i64) -> Record {
+        Record { wins, losses }
+    }
+
+    fn gold_standing(league_points: i64, wins: i64, losses: i64) -> Standing {
+        Standing {
+            record: record(wins, losses),
+            ladder: LadderPoints::new(
+                &Tier("GOLD".to_string()),
+                Some(Division::Two),
+                league_points,
+            ),
         }
     }
 
@@ -795,6 +889,89 @@ mod tests {
                     losses: 29
                 },
                 session: Record { wins: 0, losses: 0 },
+                lp_change: Some(LpChange {
+                    last_game: None,
+                    session_total: 0,
+                }),
+            })
+        );
+    }
+
+    #[test]
+    fn won_game_reports_lp_gain() {
+        let change = lp_change_after(&[
+            ranked_with_rank("GOLD", "II", 57, record(34, 29)),
+            ranked_with_rank("GOLD", "II", 78, record(35, 29)),
+        ]);
+
+        assert_eq!(
+            change,
+            Some(LpChange {
+                last_game: Some(21),
+                session_total: 21,
+            })
+        );
+    }
+
+    #[test]
+    fn lost_game_after_promotion_reports_loss_and_session_total() {
+        let change = lp_change_after(&[
+            ranked_with_rank("GOLD", "I", 90, record(34, 29)),
+            ranked_with_rank("PLATINUM", "IV", 12, record(35, 29)),
+            ranked_with_rank("GOLD", "I", 94, record(35, 30)),
+        ]);
+
+        assert_eq!(
+            change,
+            Some(LpChange {
+                last_game: Some(-18),
+                session_total: 4,
+            })
+        );
+    }
+
+    #[test]
+    fn update_without_new_game_keeps_last_game() {
+        let change = lp_change_after(&[
+            ranked_with_rank("GOLD", "II", 57, record(34, 29)),
+            ranked_with_rank("GOLD", "II", 78, record(35, 29)),
+            ranked_with_rank("GOLD", "II", 60, record(35, 29)),
+        ]);
+
+        assert_eq!(
+            change,
+            Some(LpChange {
+                last_game: Some(21),
+                session_total: 3,
+            })
+        );
+    }
+
+    #[test]
+    fn unranked_baseline_has_no_lp_change() {
+        let change = lp_change_after(&[
+            ranked_with_rank("NONE", "NA", 0, record(3, 2)),
+            ranked_with_rank("GOLD", "IV", 0, record(5, 5)),
+        ]);
+
+        assert_eq!(change, None);
+    }
+
+    #[test]
+    fn tracker_switch_to_other_account_resets_lp_change() {
+        let mut tracker = SessionTracker::default();
+        tracker.switch_account(Some(SummonerId(1)));
+        tracker.update(gold_standing(10, 10, 5));
+        tracker.update(gold_standing(30, 11, 5));
+
+        tracker.switch_account(Some(SummonerId(2)));
+        let progress = tracker.update(gold_standing(70, 40, 40));
+
+        assert_eq!(
+            progress.lp_change(),
+            Some(LpChange {
+                last_game: None,
+                session_total: 0,
             })
         );
     }
@@ -952,8 +1129,16 @@ mod tests {
 
     #[test]
     fn ranked_message_matches_e2e_fixture() {
-        let summary = ranked_from(RANKED_STATS, &mut tracker_with_baseline(32, 28))
-            .expect("solo queue present");
+        let mut tracker = SessionTracker::default();
+        summary_of(
+            &ranked_with_rank("GOLD", "III", 90, record(32, 28)),
+            &mut tracker,
+        );
+        summary_of(
+            &ranked_with_rank("GOLD", "II", 36, record(33, 29)),
+            &mut tracker,
+        );
+        let summary = ranked_from(RANKED_STATS, &mut tracker).expect("solo queue present");
 
         assert_eq!(
             message_json(&OverlayMessage::Ranked(summary)),
@@ -986,20 +1171,14 @@ mod tests {
     fn tracker_switch_to_other_account_resets_baseline() {
         let mut tracker = SessionTracker::default();
         tracker.switch_account(Some(SummonerId(1)));
-        tracker.session(Record {
-            wins: 10,
-            losses: 5,
-        });
+        tracker.update(gold_standing(50, 10, 5));
 
         let switched = tracker.switch_account(Some(SummonerId(2)));
 
         assert!(switched);
         assert_eq!(
-            tracker.session(Record {
-                wins: 12,
-                losses: 6
-            }),
-            Record { wins: 0, losses: 0 }
+            tracker.update(gold_standing(50, 12, 6)).session_record(),
+            record(0, 0)
         );
     }
 
@@ -1007,20 +1186,14 @@ mod tests {
     fn tracker_same_account_keeps_baseline() {
         let mut tracker = SessionTracker::default();
         tracker.switch_account(Some(SummonerId(1)));
-        tracker.session(Record {
-            wins: 10,
-            losses: 5,
-        });
+        tracker.update(gold_standing(50, 10, 5));
 
         let switched = tracker.switch_account(Some(SummonerId(1)));
 
         assert!(!switched);
         assert_eq!(
-            tracker.session(Record {
-                wins: 12,
-                losses: 6
-            }),
-            Record { wins: 2, losses: 1 }
+            tracker.update(gold_standing(50, 12, 6)).session_record(),
+            record(2, 1)
         );
     }
 
@@ -1036,6 +1209,10 @@ mod tests {
         assert_eq!(
             messages[3]["data"]["session"],
             json!({"wins": 2, "losses": 1})
+        );
+        assert_eq!(
+            messages[3]["data"]["lpChange"],
+            json!({"lastGame": 0, "sessionTotal": 0})
         );
         assert_eq!(messages[4], messages[2]);
         assert_eq!(messages[4]["type"], "matches");

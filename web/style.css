@@ -159,6 +159,21 @@ body {
     color: var(--hextech-gold);
 }
 
+.lp-row {
+    display: flex;
+    align-items: baseline;
+    gap: 0.8rem;
+}
+
+.lp-change {
+    font-size: 1.4rem;
+    font-weight: 800;
+}
+
+.lp-change[hidden] {
+    display: none;
+}
+
 /* Winrate Stats Layout */
 .stat-group {
     display: flex;

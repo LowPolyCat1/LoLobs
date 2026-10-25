@@ -8,6 +8,9 @@
     "session": {
       "wins": 0,
       "losses": 0
+    },
+    "lpChange": {
+      "sessionTotal": 0
     }
   }
 }

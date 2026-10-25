@@ -85,8 +85,15 @@ This message gives the rank of the player in the configured queue.
 | `losses` | number | The losses in this season. |
 | `session.wins` | number | The wins since the server started. |
 | `session.losses` | number | The losses since the server started. |
+| `lpChange.lastGame` | number | The LP change of the last game in this session, for example `21` or `-18`. The field is not present before the first game. |
+| `lpChange.sessionTotal` | number | The LP change since the server started. |
 
-The server starts the session count again when a different account logs in.
+The server starts the session count and the LP change again when a different account logs in.
+
+The server calculates the LP change on one ladder for all tiers. Each tier from `IRON` to `DIAMOND` has four divisions of 100 LP.
+`MASTER`, `GRANDMASTER` and `CHALLENGER` start at the end of `DIAMOND I` and use the LP of the League Client directly.
+The server changes `lastGame` only when the sum of wins and losses increases. An update without a new game, for example LP decay, keeps the last value.
+When the rank at the start of the session or the current rank has no tier on the ladder, for example during placement games, `lpChange` is not present.
 
 When the player has no data for the configured queue, the server does not send this message.
 
@@ -102,6 +109,10 @@ When the player has no data for the configured queue, the server does not send t
     "session": {
       "wins": 2,
       "losses": 1
+    },
+    "lpChange": {
+      "lastGame": 21,
+      "sessionTotal": 67
     }
   }
 }
@@ -138,6 +149,8 @@ The script `web/overlay.js` reads the `type` field of each message and updates t
 1. `summoner`: The script shows the Riot ID. When `tagLine` is not present, the script shows no tag.
 2. `ranked`: The script shows the tier, the division and the LP. It loads the tier emblem from CommunityDragon.
    The script also calculates the win rate of the season and of the session with `wins / (wins + losses)`.
+   `current_rank.html` shows `lpChange.lastGame` next to the LP, green for a gain and red for a loss. When the field is not present, the script hides it.
+   `session_winrate.html` shows `lpChange.sessionTotal`, for example `+67 LP`. When `lpChange` is not present, the page shows `-- LP`.
 3. `matches`: The script shows one champion icon for each game. The border color of the icon shows the result.
    To show fewer games, add the `matches` parameter to the page URL, for example `past_matches.html?matches=3`.
 

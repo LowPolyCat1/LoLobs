@@ -9,6 +9,10 @@
     "session": {
       "wins": 2,
       "losses": 1
+    },
+    "lpChange": {
+      "lastGame": 21,
+      "sessionTotal": 67
     }
   }
 }
