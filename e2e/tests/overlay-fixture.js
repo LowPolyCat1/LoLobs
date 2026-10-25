@@ -4,6 +4,7 @@ const { pathToFileURL } = require('url');
 const base = require('@playwright/test');
 
 const REPO_ROOT = path.resolve(__dirname, '..', '..');
+const WEB_DIR = path.join(REPO_ROOT, 'web');
 const SOCKET_URL = 'ws://127.0.0.1:2009/ws';
 const PNG_1X1 = Buffer.from(
   'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNkYPhfDwAChwGA60e6kgAAAABJRU5ErkJggg==',
@@ -16,7 +17,7 @@ function loadFixture(name) {
 }
 
 function pageUrl(htmlFile) {
-  return pathToFileURL(path.join(REPO_ROOT, htmlFile)).href;
+  return pathToFileURL(path.join(WEB_DIR, htmlFile)).href;
 }
 
 // Records every WebSocket connection the overlay opens, so tests can push
