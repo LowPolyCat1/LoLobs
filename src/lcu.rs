@@ -3,13 +3,15 @@ use crate::message::{
     ChampionId, Division, LadderPoints, LpChange, MatchHistory, MatchResult, MatchSummary,
     OverlayMessage, RankedSummary, Record, RiotId, Streak, Tier,
 };
+use crate::session::{SessionOwner, SessionStore};
 use crate::snapshot::Outbox;
+use chrono::NaiveDate;
 use irelia::ws::{
     LcuWebSocket,
     types::{EventData, EventKind},
 };
-use serde::Deserialize;
 use serde::de::DeserializeOwned;
+use serde::{Deserialize, Serialize};
 use std::fmt;
 use std::future::Future;
 use std::sync::{Arc, Mutex, MutexGuard, PoisonError};
@@ -23,13 +25,13 @@ const RANKED_STATS_URI: &str = "/lol-ranked/v1/current-ranked-stats";
 const MATCH_HISTORY_URI: &str = "/lol-match-history/v1/products/lol/current-summoner/matches";
 const RETRY_DELAY: Duration = Duration::from_secs(5);
 
-#[derive(Deserialize, Clone, Copy, Debug, PartialEq, Eq)]
+#[derive(Serialize, Deserialize, Clone, Copy, Debug, PartialEq, Eq)]
 #[serde(transparent)]
-struct SummonerId(u64);
+pub struct SummonerId(pub u64);
 
-#[derive(Deserialize, Clone, Copy, Debug, PartialEq, Eq)]
+#[derive(Serialize, Deserialize, Clone, Copy, Debug, PartialEq, Eq)]
 #[serde(transparent)]
-struct QueueId(u32);
+pub struct QueueId(pub u32);
 
 /// The queue that the overlay shows: its name in ranked stats and its ID in match history.
 #[derive(Clone, Copy, Debug)]
@@ -251,11 +253,13 @@ fn match_history(history: &LcuMatchHistory, selection: Selection) -> MatchHistor
 }
 
 /// The record and the ladder position of the selected queue at one time.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-struct Standing {
-    record: Record,
+#[derive(Serialize, Deserialize, Clone, Copy, Debug, PartialEq, Eq)]
+pub struct Standing {
+    #[serde(flatten)]
+    pub record: Record,
     /// Not present when the player has no rank on the ladder, for example during placement games.
-    ladder: Option<LadderPoints>,
+    #[serde(rename = "ladderPoints")]
+    pub ladder: Option<LadderPoints>,
 }
 
 impl Standing {
@@ -273,7 +277,7 @@ struct SessionProgress {
 
 impl SessionProgress {
     fn start(baseline: Standing) -> Self {
-        tracing::info!(target: "lcu_monitor", "New baseline established: {}W - {}L", baseline.record.wins, baseline.record.losses);
+        tracing::info!(target: "lcu_monitor", "Session baseline: {}W - {}L", baseline.record.wins, baseline.record.losses);
         Self {
             baseline,
             latest: baseline,
@@ -306,9 +310,18 @@ impl SessionProgress {
 struct SessionTracker {
     summoner_id: Option<SummonerId>,
     progress: Option<SessionProgress>,
+    /// Not present when the server does not save the session.
+    store: Option<SessionStore>,
 }
 
 impl SessionTracker {
+    fn new(store: Option<SessionStore>) -> Self {
+        Self {
+            store,
+            ..Self::default()
+        }
+    }
+
     fn switch_account(&mut self, id: Option<SummonerId>) -> bool {
         if self.summoner_id == id {
             return false;
@@ -318,12 +331,31 @@ impl SessionTracker {
         true
     }
 
-    fn update(&mut self, current: Standing) -> &SessionProgress {
-        let progress = self
-            .progress
-            .get_or_insert_with(|| SessionProgress::start(current));
+    fn update(
+        &mut self,
+        current: Standing,
+        queue_id: QueueId,
+        today: NaiveDate,
+    ) -> &SessionProgress {
+        let progress = match self.progress.take() {
+            Some(progress) => progress,
+            None => SessionProgress::start(self.baseline(current, queue_id, today)),
+        };
+        let progress = self.progress.insert(progress);
         progress.advance(current);
         progress
+    }
+
+    /// Returns `current` when the server does not save the session or the account is not known.
+    fn baseline(&mut self, current: Standing, queue_id: QueueId, today: NaiveDate) -> Standing {
+        let (Some(store), Some(summoner_id)) = (self.store.as_mut(), self.summoner_id) else {
+            return current;
+        };
+        let owner = SessionOwner {
+            summoner_id,
+            queue_id,
+        };
+        store.baseline(owner, today, current)
     }
 }
 
@@ -331,10 +363,11 @@ fn ranked_summary(
     stats: &LcuRankedStats,
     queue: RankedQueue,
     tracker: &mut SessionTracker,
+    today: NaiveDate,
 ) -> Option<RankedSummary> {
-    let queue = stats.queue(queue)?;
-    let progress = tracker.update(queue.standing());
-    Some(queue.summary(progress))
+    let lcu_queue = stats.queue(queue)?;
+    let progress = tracker.update(lcu_queue.standing(), queue.queue_id, today);
+    Some(lcu_queue.summary(progress))
 }
 
 type SharedState = Arc<Mutex<SessionTracker>>;
@@ -377,8 +410,8 @@ fn lock_state(state: &SharedState) -> MutexGuard<'_, SessionTracker> {
     state.lock().unwrap_or_else(PoisonError::into_inner)
 }
 
-pub fn spawn_lcu_listener(outbox: Outbox, selection: Selection) {
-    let state = Arc::new(Mutex::new(SessionTracker::default()));
+pub fn spawn_lcu_listener(outbox: Outbox, selection: Selection, store: Option<SessionStore>) {
+    let state = Arc::new(Mutex::new(SessionTracker::new(store)));
 
     tokio::spawn(async move {
         tracing::info!("LCU Listener task spawned. Searching for active League client...");
@@ -501,7 +534,9 @@ fn publish_ranked_stats(
     else {
         return;
     };
-    let Some(summary) = ranked_summary(&stats, selection.queue, &mut lock_state(state)) else {
+    let today = chrono::Local::now().date_naive();
+    let Some(summary) = ranked_summary(&stats, selection.queue, &mut lock_state(state), today)
+    else {
         return;
     };
     publish(outbox, &OverlayMessage::Ranked(summary));
@@ -572,6 +607,7 @@ async fn wait_until_disconnected(source: &impl LcuSource) {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::config::SessionMode;
     use crate::message::StreakKind;
     use serde_json::{Value, json};
     use std::collections::HashMap;
@@ -675,6 +711,8 @@ mod tests {
     }
 
     const SOLO: Selection = Selection::new(Queue::Solo, MatchLimit::DEFAULT);
+    const SOLO_ID: QueueId = QueueId(420);
+    const TODAY: NaiveDate = NaiveDate::from_ymd_opt(2026, 10, 25).expect("date is valid");
 
     fn with_limit(queue: Queue, limit: u64) -> Selection {
         Selection::new(queue, MatchLimit::try_from(limit).expect("limit is valid"))
@@ -720,7 +758,7 @@ mod tests {
     fn ranked_from(text: &str, tracker: &mut SessionTracker) -> Option<RankedSummary> {
         let stats = parse::<LcuRankedStats>(&fixture(text), RANKED_STATS_URI)
             .expect("ranked fixture parses");
-        ranked_summary(&stats, SOLO.queue, tracker)
+        ranked_summary(&stats, SOLO.queue, tracker, TODAY)
     }
 
     fn history(text: &str) -> LcuMatchHistory {
@@ -737,7 +775,7 @@ mod tests {
 
     fn summary_of(stats: &Value, tracker: &mut SessionTracker) -> Option<RankedSummary> {
         let stats = parse::<LcuRankedStats>(stats, RANKED_STATS_URI).expect("ranked stats parse");
-        ranked_summary(&stats, SOLO.queue, tracker)
+        ranked_summary(&stats, SOLO.queue, tracker, TODAY)
     }
 
     fn lp_change_after(updates: &[Value]) -> Option<LpChange> {
@@ -971,11 +1009,11 @@ mod tests {
     fn tracker_switch_to_other_account_resets_lp_change() {
         let mut tracker = SessionTracker::default();
         tracker.switch_account(Some(SummonerId(1)));
-        tracker.update(gold_standing(10, 10, 5));
-        tracker.update(gold_standing(30, 11, 5));
+        tracker.update(gold_standing(10, 10, 5), SOLO_ID, TODAY);
+        tracker.update(gold_standing(30, 11, 5), SOLO_ID, TODAY);
 
         tracker.switch_account(Some(SummonerId(2)));
-        let progress = tracker.update(gold_standing(70, 40, 40));
+        let progress = tracker.update(gold_standing(70, 40, 40), SOLO_ID, TODAY);
 
         assert_eq!(
             progress.lp_change(),
@@ -1019,7 +1057,7 @@ mod tests {
             .expect("ranked fixture parses");
         let flex = Selection::new(Queue::Flex, MatchLimit::DEFAULT);
 
-        let summary = ranked_summary(&stats, flex.queue, &mut SessionTracker::default());
+        let summary = ranked_summary(&stats, flex.queue, &mut SessionTracker::default(), TODAY);
 
         assert_eq!(summary.map(|s| s.tier), Some(Tier("SILVER".to_string())));
     }
@@ -1233,13 +1271,15 @@ mod tests {
     fn tracker_switch_to_other_account_resets_baseline() {
         let mut tracker = SessionTracker::default();
         tracker.switch_account(Some(SummonerId(1)));
-        tracker.update(gold_standing(50, 10, 5));
+        tracker.update(gold_standing(50, 10, 5), SOLO_ID, TODAY);
 
         let switched = tracker.switch_account(Some(SummonerId(2)));
 
         assert!(switched);
         assert_eq!(
-            tracker.update(gold_standing(50, 12, 6)).session_record(),
+            tracker
+                .update(gold_standing(50, 12, 6), SOLO_ID, TODAY)
+                .session_record(),
             record(0, 0)
         );
     }
@@ -1248,14 +1288,42 @@ mod tests {
     fn tracker_same_account_keeps_baseline() {
         let mut tracker = SessionTracker::default();
         tracker.switch_account(Some(SummonerId(1)));
-        tracker.update(gold_standing(50, 10, 5));
+        tracker.update(gold_standing(50, 10, 5), SOLO_ID, TODAY);
 
         let switched = tracker.switch_account(Some(SummonerId(1)));
 
         assert!(!switched);
         assert_eq!(
-            tracker.update(gold_standing(50, 12, 6)).session_record(),
+            tracker
+                .update(gold_standing(50, 12, 6), SOLO_ID, TODAY)
+                .session_record(),
             record(2, 1)
+        );
+    }
+
+    #[test]
+    fn restarted_tracker_continues_the_saved_session() {
+        let dir = std::env::temp_dir().join(format!("lolobs-lcu-session-{}", std::process::id()));
+        // A process ID can repeat between runs (always under wine), so a folder from an earlier run can exist.
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).expect("create temp dir");
+        let exe = dir.join("LoLobs.exe");
+        let open = || SessionStore::open(SessionMode::Resume, Some(&exe));
+        let mut first = SessionTracker::new(open());
+        first.switch_account(Some(SummonerId(1)));
+        first.update(gold_standing(50, 10, 5), SOLO_ID, TODAY);
+
+        let mut second = SessionTracker::new(open());
+        second.switch_account(Some(SummonerId(1)));
+        let progress = second.update(gold_standing(71, 11, 5), SOLO_ID, TODAY);
+
+        assert_eq!(progress.session_record(), record(1, 0));
+        assert_eq!(
+            progress.lp_change(),
+            Some(LpChange {
+                last_game: Some(21),
+                session_total: 21,
+            })
         );
     }
 

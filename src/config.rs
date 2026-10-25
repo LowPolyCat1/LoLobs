@@ -69,6 +69,27 @@ impl FromStr for MatchLimit {
     }
 }
 
+/// How the server uses the saved session stats in `session.json`.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum SessionMode {
+    /// The server does not read or write the file.
+    Off,
+    /// The server continues the saved session of the same account on the same day.
+    Resume,
+    /// The server ignores the saved session at startup and replaces it.
+    Reset,
+}
+
+impl SessionMode {
+    fn new(persist: bool, reset: bool) -> Self {
+        match (persist, reset) {
+            (false, _) => Self::Off,
+            (true, false) => Self::Resume,
+            (true, true) => Self::Reset,
+        }
+    }
+}
+
 /// Settings from the config file or from the command line. A missing value uses the value from the next source.
 #[derive(Parser, Deserialize, Debug, Default, PartialEq, Eq)]
 #[serde(deny_unknown_fields)]
@@ -89,6 +110,17 @@ pub struct Overrides {
     /// The maximum number of games in the match history, from 1 to 20 [default: 5]
     #[arg(long)]
     match_limit: Option<MatchLimit>,
+    /// Do not save the session stats to session.json and do not read them at startup
+    #[arg(
+        long = "no-persist-session",
+        num_args = 0,
+        default_missing_value = "false"
+    )]
+    persist_session: Option<bool>,
+    /// Ignore the saved session stats at startup and start a new session
+    #[arg(long)]
+    #[serde(skip)]
+    reset_session: bool,
 }
 
 impl Overrides {
@@ -98,6 +130,8 @@ impl Overrides {
             port: self.port.or(fallback.port),
             queue: self.queue.or(fallback.queue),
             match_limit: self.match_limit.or(fallback.match_limit),
+            persist_session: self.persist_session.or(fallback.persist_session),
+            reset_session: self.reset_session || fallback.reset_session,
         }
     }
 }
@@ -108,6 +142,7 @@ pub struct Config {
     pub port: u16,
     pub queue: Queue,
     pub match_limit: MatchLimit,
+    pub session: SessionMode,
 }
 
 impl From<Overrides> for Config {
@@ -117,6 +152,7 @@ impl From<Overrides> for Config {
             port: values.port.unwrap_or(DEFAULT_PORT),
             queue: values.queue.unwrap_or_default(),
             match_limit: values.match_limit.unwrap_or_default(),
+            session: SessionMode::new(values.persist_session.unwrap_or(true), values.reset_session),
         }
     }
 }
@@ -156,11 +192,9 @@ impl fmt::Display for ConfigError {
     }
 }
 
-/// Returns the path of the config file next to the executable.
-fn config_path(exe_path: Option<&Path>) -> Option<PathBuf> {
-    exe_path
-        .and_then(Path::parent)
-        .map(|dir| dir.join(CONFIG_FILE_NAME))
+/// Returns the path of the file `name` in the folder of the executable.
+pub fn next_to_exe(exe_path: Option<&Path>, name: &str) -> Option<PathBuf> {
+    exe_path.and_then(Path::parent).map(|dir| dir.join(name))
 }
 
 /// Returns `None` when the file does not exist.
@@ -194,7 +228,7 @@ fn load_file(path: Option<&Path>) -> Result<Overrides, ConfigError> {
 
 /// Reads the config file next to `exe_path` and applies the command line values on top of it.
 pub fn load(exe_path: Option<&Path>, cli: Overrides) -> Result<Config, ConfigError> {
-    let file = load_file(config_path(exe_path).as_deref())?;
+    let file = load_file(next_to_exe(exe_path, CONFIG_FILE_NAME).as_deref())?;
     Ok(Config::from(cli.or(file)))
 }
 
@@ -235,8 +269,9 @@ mod tests {
 
     #[test]
     fn full_file_sets_all_values() {
-        let exe =
-            exe_with_config("ip = \"0.0.0.0\"\nport = 3000\nqueue = \"flex\"\nmatch_limit = 10\n");
+        let exe = exe_with_config(
+            "ip = \"0.0.0.0\"\nport = 3000\nqueue = \"flex\"\nmatch_limit = 10\npersist_session = false\n",
+        );
 
         let config = load(Some(&exe), Overrides::default()).expect("config loads");
 
@@ -247,6 +282,7 @@ mod tests {
                 port: 3000,
                 queue: Queue::Flex,
                 match_limit: limit(10),
+                session: SessionMode::Off,
             }
         );
     }
@@ -279,6 +315,7 @@ mod tests {
                 port: 2009,
                 queue: Queue::Solo,
                 match_limit: limit(5),
+                session: SessionMode::Resume,
             }
         );
     }
@@ -313,6 +350,7 @@ mod tests {
             "flex",
             "--match-limit",
             "20",
+            "--reset-session",
         ]);
 
         assert_eq!(
@@ -322,6 +360,7 @@ mod tests {
                 port: 4000,
                 queue: Queue::Flex,
                 match_limit: limit(20),
+                session: SessionMode::Reset,
             }
         );
     }
@@ -387,6 +426,45 @@ mod tests {
         let example = parse(include_str!("../config.example.toml")).expect("example parses");
 
         assert_eq!(Config::from(example), Config::from(Overrides::default()));
+    }
+
+    #[test]
+    fn no_persist_session_flag_overrides_file() {
+        let exe = exe_with_config("persist_session = true\n");
+
+        let config = load(Some(&exe), cli(&["--no-persist-session"])).expect("config loads");
+
+        assert_eq!(config.session, SessionMode::Off);
+    }
+
+    #[test]
+    fn no_persist_session_wins_over_reset_session() {
+        let args = cli(&["--no-persist-session", "--reset-session"]);
+
+        assert_eq!(Config::from(args).session, SessionMode::Off);
+    }
+
+    #[test]
+    fn reset_session_keeps_persistence_from_file() {
+        let exe = exe_with_config("persist_session = true\n");
+
+        let config = load(Some(&exe), cli(&["--reset-session"])).expect("config loads");
+
+        assert_eq!(config.session, SessionMode::Reset);
+    }
+
+    #[test]
+    fn no_persist_session_flag_takes_no_value() {
+        let result = Overrides::try_parse_from(["LoLobs", "--no-persist-session=true"]);
+
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn reset_session_in_file_is_an_error() {
+        let err = parse("reset_session = true\n").expect_err("key is unknown");
+
+        assert!(err.to_string().contains("reset_session"), "{err}");
     }
 
     #[test]

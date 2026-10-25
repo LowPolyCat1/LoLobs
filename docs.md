@@ -14,8 +14,13 @@ The file `config.example.toml` shows all keys with their default values.
 | `port` | `--port` | `2009` | The port of the overlay server. |
 | `queue` | `--queue` | `solo` | The ranked queue: `solo` for Ranked Solo/Duo, `flex` for Ranked Flex. |
 | `match_limit` | `--match-limit` | `5` | The maximum number of games in the `matches` message. The value is a number from 1 to 20. |
+| `persist_session` | `--no-persist-session` | `true` | Saves the session stats to `session.json`. For the session rules, refer to [Session](#session). |
 
 A command line flag replaces the value from the file, for example `LoLobs.exe --queue flex --match-limit 10`.
+The `--no-persist-session` flag sets `persist_session` to `false`.
+
+The `--reset-session` flag starts a new session at startup and replaces the saved session in `session.json`.
+This flag has no key in the config file. The flag has no effect when `persist_session` is `false`.
 
 When the file or a value is not valid, the server logs an error and stops. The error gives the file, the key and the value.
 
@@ -24,7 +29,29 @@ ip = "127.0.0.1"
 port = 2009
 queue = "solo"
 match_limit = 5
+persist_session = true
 ```
+
+### Session
+
+The session is the period that the `session` and `lpChange` fields of the `ranked` message count.
+The session starts with the first ranked stats after the server finds the account.
+
+When `persist_session` is `true`, the server saves the start values of the session to `session.json` in the folder of `LoLobs.exe`.
+The file contains the summoner ID, the queue, the local date, the wins, the losses and the ladder position at the start of the session.
+The server writes the file only when a new session starts.
+
+When the server finds the account, it reads the saved session. The server continues the saved session only when all these conditions are true:
+
+* The saved session has the same summoner ID.
+* The saved session has the same queue.
+* The saved session started on the same local calendar date.
+
+In all other conditions, the server starts a new session and replaces the file.
+When the server cannot read the file or the file is not valid, the server logs a warning with the path and starts a new session.
+When the server cannot write the file, the server logs a warning with the path and continues.
+
+When `persist_session` is `false`, the server does not read or write `session.json`. Each start of the server starts a new session.
 
 ## Message Format
 
@@ -83,12 +110,13 @@ This message gives the rank of the player in the configured queue.
 | `leaguePoints` | number | The League Points (LP) in the current division. |
 | `wins` | number | The wins in this season. |
 | `losses` | number | The losses in this season. |
-| `session.wins` | number | The wins since the server started. |
-| `session.losses` | number | The losses since the server started. |
+| `session.wins` | number | The wins in this session. |
+| `session.losses` | number | The losses in this session. |
 | `lpChange.lastGame` | number | The LP change of the last game in this session, for example `21` or `-18`. The field is not present before the first game. |
-| `lpChange.sessionTotal` | number | The LP change since the server started. |
+| `lpChange.sessionTotal` | number | The LP change in this session. |
 
 The server starts the session count and the LP change again when a different account logs in.
+For the start of a session after a restart of the server, refer to [Session](#session).
 
 The server calculates the LP change on one ladder for all tiers. Each tier from `IRON` to `DIAMOND` has four divisions of 100 LP.
 `MASTER`, `GRANDMASTER` and `CHALLENGER` start at the end of `DIAMOND I` and use the LP of the League Client directly.

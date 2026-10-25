@@ -1,3 +1,4 @@
+use crate::config::next_to_exe;
 use actix_files::Files;
 use actix_web::web::ServiceConfig;
 use std::net::SocketAddr;
@@ -13,10 +14,7 @@ const PAGES: [&str; 4] = [
 
 /// Returns the possible overlay folders in priority order: next to the executable, then in `cwd`.
 fn candidates(exe_path: Option<&Path>, cwd: &Path) -> Vec<PathBuf> {
-    let exe_candidate = exe_path
-        .and_then(Path::parent)
-        .map(|dir| dir.join(WEB_DIR_NAME));
-    exe_candidate
+    next_to_exe(exe_path, WEB_DIR_NAME)
         .into_iter()
         .chain(std::iter::once(cwd.join(WEB_DIR_NAME)))
         .collect()
