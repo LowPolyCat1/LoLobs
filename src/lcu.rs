@@ -1,3 +1,4 @@
+use crate::snapshot::{Outbox, Topic};
 use irelia::ws::{
     LcuWebSocket,
     types::{EventData, EventKind},
@@ -6,7 +7,6 @@ use serde::{Deserialize, Serialize};
 use std::future::Future;
 use std::sync::{Arc, Mutex, MutexGuard, PoisonError};
 use std::time::Duration;
-use tokio::sync::broadcast;
 
 type ConcreteLcuClient = irelia::rest::LcuClient<irelia::requests::RequestClientType>;
 
@@ -124,10 +124,6 @@ impl LcuSource for IreliaSource {
     }
 }
 
-pub async fn fetch_endpoint(uri: &str) -> Option<serde_json::Value> {
-    IreliaSource::connect()?.fetch(uri).await
-}
-
 fn lock_state(state: &SharedState) -> MutexGuard<'_, SessionTracker> {
     state.lock().unwrap_or_else(PoisonError::into_inner)
 }
@@ -139,41 +135,37 @@ fn handle_ranked_stats(data: &serde_json::Value, state: &SharedState) -> Option<
     serde_json::to_string(&stats).ok()
 }
 
-pub fn spawn_lcu_listener(tx: broadcast::Sender<String>) {
+pub fn spawn_lcu_listener(outbox: Outbox) {
     let state = Arc::new(Mutex::new(SessionTracker::default()));
 
     tokio::spawn(async move {
         tracing::info!("LCU Listener task spawned. Searching for active League client...");
 
         loop {
-            run_irelia_cycle(&tx, &state).await;
+            run_irelia_cycle(&outbox, &state).await;
             tokio::time::sleep(RETRY_DELAY).await;
         }
     });
 }
 
-async fn run_irelia_cycle(tx: &broadcast::Sender<String>, state: &SharedState) {
+async fn run_irelia_cycle(outbox: &Outbox, state: &SharedState) {
     let Some(mut source) = IreliaSource::connect() else {
         return;
     };
-    run_listener_cycle(&mut source, tx, state).await;
+    run_listener_cycle(&mut source, outbox, state).await;
 }
 
-async fn run_listener_cycle(
-    source: &mut impl LcuSource,
-    tx: &broadcast::Sender<String>,
-    state: &SharedState,
-) {
+async fn run_listener_cycle(source: &mut impl LcuSource, outbox: &Outbox, state: &SharedState) {
     let Some(summoner) = source.fetch(SUMMONER_URI).await else {
         return;
     };
 
     update_account(state, &summoner);
 
-    let tx_inner = tx.clone();
+    let outbox_inner = outbox.clone();
     let state_inner = Arc::clone(state);
     let connection = source.subscribe(move |event| {
-        handle_lcu_event(event, &tx_inner, &state_inner);
+        handle_lcu_event(event, &outbox_inner, &state_inner);
     });
 
     if connection.is_none() {
@@ -182,7 +174,7 @@ async fn run_listener_cycle(
 
     tracing::info!(target: "lcu_monitor", "Connected to LCU WebSocket.");
 
-    send_initial_sync(source, tx, state).await;
+    send_initial_sync(source, outbox, state).await;
     wait_until_disconnected(source).await;
 
     tracing::warn!(target: "lcu_monitor", "LCU connection lost. Retrying...");
@@ -196,76 +188,77 @@ fn update_account(state: &SharedState, summoner: &serde_json::Value) {
     tracing::info!(target: "lcu_monitor", "Account detected: ID {:?}", new_id);
 }
 
-fn handle_lcu_event(payload: &EventData, tx: &broadcast::Sender<String>, state: &SharedState) {
+fn handle_lcu_event(payload: &EventData, outbox: &Outbox, state: &SharedState) {
     match payload.uri.as_str() {
-        RANKED_STATS_URI => push_ranked_stats(&payload.data, tx, state),
-        SUMMONER_URI => push_raw(&payload.data, tx, "Pushing Summoner profile update"),
-        MATCH_HISTORY_URI => push_raw(&payload.data, tx, "Pushing Match History update"),
+        RANKED_STATS_URI => push_ranked_stats(&payload.data, outbox, state),
+        SUMMONER_URI => push_raw(
+            &payload.data,
+            outbox,
+            Topic::Summoner,
+            "Pushing Summoner profile update",
+        ),
+        MATCH_HISTORY_URI => push_raw(
+            &payload.data,
+            outbox,
+            Topic::MatchHistory,
+            "Pushing Match History update",
+        ),
         _ => {}
     }
 }
 
-fn push_ranked_stats(
-    data: &serde_json::Value,
-    tx: &broadcast::Sender<String>,
-    state: &SharedState,
-) {
+fn push_ranked_stats(data: &serde_json::Value, outbox: &Outbox, state: &SharedState) {
     let Some(json) = handle_ranked_stats(data, state) else {
         return;
     };
-    let _ = tx.send(json);
+    outbox.publish(Topic::RankedStats, json);
     tracing::info!(target: "overlay_update", "Pushing Ranked Stats update");
 }
 
-fn push_raw(data: &serde_json::Value, tx: &broadcast::Sender<String>, log_message: &str) {
-    let _ = tx.send(data.to_string());
+fn push_raw(data: &serde_json::Value, outbox: &Outbox, topic: Topic, log_message: &str) {
+    outbox.publish(topic, data.to_string());
     tracing::info!(target: "overlay_update", "{}", log_message);
 }
 
-async fn send_initial_sync(
-    source: &impl LcuSource,
-    tx: &broadcast::Sender<String>,
-    state: &SharedState,
-) {
-    sync_summoner(source, tx).await;
-    sync_ranked_stats(source, tx, state).await;
-    sync_recent_matches(source, tx).await;
+async fn send_initial_sync(source: &impl LcuSource, outbox: &Outbox, state: &SharedState) {
+    sync_summoner(source, outbox).await;
+    sync_ranked_stats(source, outbox, state).await;
+    sync_recent_matches(source, outbox).await;
 }
 
-async fn sync_summoner(source: &impl LcuSource, tx: &broadcast::Sender<String>) {
+async fn sync_summoner(source: &impl LcuSource, outbox: &Outbox) {
     let Some(profile) = source.fetch(SUMMONER_URI).await else {
         return;
     };
-    let Ok(json) = serde_json::to_string(&profile) else {
-        return;
-    };
-    let _ = tx.send(json);
-    tracing::info!(target: "overlay_update", "Initial Sync: Summoner Profile sent");
+    push_raw(
+        &profile,
+        outbox,
+        Topic::Summoner,
+        "Initial Sync: Summoner Profile sent",
+    );
 }
 
-async fn sync_ranked_stats(
-    source: &impl LcuSource,
-    tx: &broadcast::Sender<String>,
-    state: &SharedState,
-) {
+async fn sync_ranked_stats(source: &impl LcuSource, outbox: &Outbox, state: &SharedState) {
     let Some(stats) = source.fetch(RANKED_STATS_URI).await else {
         return;
     };
     let Some(json) = handle_ranked_stats(&stats, state) else {
         return;
     };
-    let _ = tx.send(json);
+    outbox.publish(Topic::RankedStats, json);
     tracing::info!(target: "overlay_update", "Initial Sync: Ranked Stats sent");
 }
 
-async fn sync_recent_matches(source: &impl LcuSource, tx: &broadcast::Sender<String>) {
+async fn sync_recent_matches(source: &impl LcuSource, outbox: &Outbox) {
     let Some(matches) = source.fetch(MATCH_HISTORY_URI).await else {
         return;
     };
-    let Ok(json) = serde_json::to_string(&matches) else {
-        return;
-    };
-    let _ = tx.send(json);
+    push_raw(
+        &matches,
+        outbox,
+        Topic::MatchHistory,
+        "Pushing Match History update",
+    );
 }
 
 async fn wait_until_disconnected(source: &impl LcuSource) {
@@ -361,15 +354,23 @@ mod tests {
         Arc::new(Mutex::new(SessionTracker::default()))
     }
 
-    fn drain(rx: &mut broadcast::Receiver<String>) -> Vec<Value> {
+    fn drain(rx: &mut tokio::sync::broadcast::Receiver<String>) -> Vec<Value> {
         std::iter::from_fn(|| rx.try_recv().ok())
             .map(|msg| serde_json::from_str(&msg).expect("broadcast is valid JSON"))
             .collect()
     }
 
     async fn run_cycle(source: &mut MockSource, state: &SharedState) -> Vec<Value> {
-        let (tx, mut rx) = broadcast::channel(32);
-        let cycle = run_listener_cycle(source, &tx, state);
+        run_cycle_with_outbox(source, state, &Outbox::new(32)).await
+    }
+
+    async fn run_cycle_with_outbox(
+        source: &mut MockSource,
+        state: &SharedState,
+        outbox: &Outbox,
+    ) -> Vec<Value> {
+        let mut rx = outbox.subscribe();
+        let cycle = run_listener_cycle(source, outbox, state);
         tokio::time::timeout(Duration::from_secs(600), cycle)
             .await
             .expect("cycle ends after disconnect");
@@ -394,6 +395,22 @@ mod tests {
         assert_eq!(messages[1]["queues"], fixture(RANKED_STATS)["queues"]);
         assert_eq!(messages[1]["session"], json!({"wins": 0, "losses": 0}));
         assert_eq!(messages[2], fixture(MATCHES));
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn initial_sync_fills_snapshot_with_broadcast_messages() {
+        let outbox = Outbox::new(32);
+        let mut source = MockSource::running(fixture(SUMMONER), fixture(RANKED_STATS), 3);
+
+        let messages = run_cycle_with_outbox(&mut source, &new_state(), &outbox).await;
+
+        let snapshot: Vec<Value> = outbox
+            .snapshot()
+            .messages()
+            .iter()
+            .map(|msg| serde_json::from_str(msg).expect("snapshot is valid JSON"))
+            .collect();
+        assert_eq!(snapshot, messages);
     }
 
     #[tokio::test(start_paused = true)]

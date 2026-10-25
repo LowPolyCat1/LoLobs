@@ -1,16 +1,16 @@
 mod lcu;
+mod snapshot;
 mod ws;
 
 use actix_web::{App, HttpRequest, HttpResponse, HttpServer, web};
-use std::sync::Arc;
-use tokio::sync::broadcast;
+use snapshot::Outbox;
 
 async fn ws_route(
     req: HttpRequest,
     stream: web::Payload,
-    tx: web::Data<Arc<broadcast::Sender<String>>>,
+    outbox: web::Data<Outbox>,
 ) -> Result<HttpResponse, actix_web::Error> {
-    ws::start(&req, stream, tx.subscribe())
+    ws::start(&req, stream, outbox.subscribe(), outbox.snapshot())
 }
 
 const IP: &str = "127.0.0.1";
@@ -28,16 +28,15 @@ async fn main() -> std::io::Result<()> {
         std::process::exit(1);
     }
 
-    let (tx, _) = broadcast::channel::<String>(32);
-    let tx_arc = Arc::new(tx);
+    let outbox = Outbox::new(32);
 
-    lcu::spawn_lcu_listener((*tx_arc).clone());
+    lcu::spawn_lcu_listener(outbox.clone());
 
     tracing::info!("Starting Overlay Server on {}:{}", IP, PORT);
 
     HttpServer::new(move || {
         App::new()
-            .app_data(web::Data::new(Arc::clone(&tx_arc)))
+            .app_data(web::Data::new(outbox.clone()))
             .route("/ws", web::get().to(ws_route))
     })
     .workers(1)
