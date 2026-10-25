@@ -1,0 +1,427 @@
+{
+  "accountId": 2408901234567890,
+  "games": {
+    "gameBeginDate": "",
+    "gameCount": 9,
+    "gameEndDate": "",
+    "gameIndexBegin": 0,
+    "gameIndexEnd": 8,
+    "games": [
+      {
+        "gameCreation": 1761328800000,
+        "gameCreationDate": "2025-10-24T18:00:00.000Z",
+        "gameDuration": 1854,
+        "gameId": 7200000008,
+        "gameMode": "CLASSIC",
+        "gameType": "MATCHED_GAME",
+        "gameVersion": "15.20.715.1234",
+        "mapId": 11,
+        "participantIdentities": [
+          {
+            "participantId": 1,
+            "player": {
+              "gameName": "PlayerOne",
+              "tagLine": "EUW",
+              "puuid": "8f3c1a2e-5b7d-4e9f-a1c3-0d2e4f6a8b9c",
+              "summonerId": 98765432
+            }
+          }
+        ],
+        "participants": [
+          {
+            "championId": 103,
+            "participantId": 1,
+            "spell1Id": 4,
+            "spell2Id": 14,
+            "teamId": 100,
+            "stats": {
+              "assists": 7,
+              "champLevel": 16,
+              "deaths": 4,
+              "goldEarned": 12450,
+              "kills": 5,
+              "totalMinionsKilled": 187,
+              "win": true
+            },
+            "timeline": {
+              "lane": "MIDDLE",
+              "role": "SOLO"
+            }
+          }
+        ],
+        "platformId": "EUW1",
+        "queueId": 420,
+        "seasonId": 15
+      },
+      {
+        "gameCreation": 1761325200000,
+        "gameCreationDate": "2025-10-24T17:00:00.000Z",
+        "gameDuration": 2210,
+        "gameId": 7200000007,
+        "gameMode": "CLASSIC",
+        "gameType": "MATCHED_GAME",
+        "gameVersion": "15.20.715.1234",
+        "mapId": 11,
+        "participantIdentities": [
+          {
+            "participantId": 1,
+            "player": {
+              "gameName": "PlayerOne",
+              "tagLine": "EUW",
+              "puuid": "8f3c1a2e-5b7d-4e9f-a1c3-0d2e4f6a8b9c",
+              "summonerId": 98765432
+            }
+          }
+        ],
+        "participants": [
+          {
+            "championId": 222,
+            "participantId": 1,
+            "spell1Id": 4,
+            "spell2Id": 14,
+            "teamId": 100,
+            "stats": {
+              "assists": 7,
+              "champLevel": 16,
+              "deaths": 4,
+              "goldEarned": 12450,
+              "kills": 5,
+              "totalMinionsKilled": 187,
+              "win": false
+            },
+            "timeline": {
+              "lane": "MIDDLE",
+              "role": "SOLO"
+            }
+          }
+        ],
+        "platformId": "EUW1",
+        "queueId": 420,
+        "seasonId": 15
+      },
+      {
+        "gameCreation": 1761321600000,
+        "gameCreationDate": "2025-10-24T16:00:00.000Z",
+        "gameDuration": 1302,
+        "gameId": 7200000006,
+        "gameMode": "ARAM",
+        "gameType": "MATCHED_GAME",
+        "gameVersion": "15.20.715.1234",
+        "mapId": 12,
+        "participantIdentities": [
+          {
+            "participantId": 1,
+            "player": {
+              "gameName": "PlayerOne",
+              "tagLine": "EUW",
+              "puuid": "8f3c1a2e-5b7d-4e9f-a1c3-0d2e4f6a8b9c",
+              "summonerId": 98765432
+            }
+          }
+        ],
+        "participants": [
+          {
+            "championId": 54,
+            "participantId": 1,
+            "spell1Id": 4,
+            "spell2Id": 14,
+            "teamId": 100,
+            "stats": {
+              "assists": 7,
+              "champLevel": 16,
+              "deaths": 4,
+              "goldEarned": 12450,
+              "kills": 5,
+              "totalMinionsKilled": 187,
+              "win": true
+            },
+            "timeline": {
+              "lane": "MIDDLE",
+              "role": "SOLO"
+            }
+          }
+        ],
+        "platformId": "EUW1",
+        "queueId": 450,
+        "seasonId": 15
+      },
+      {
+        "gameCreation": 1761318000000,
+        "gameCreationDate": "2025-10-24T15:00:00.000Z",
+        "gameDuration": 214,
+        "gameId": 7200000005,
+        "gameMode": "CLASSIC",
+        "gameType": "MATCHED_GAME",
+        "gameVersion": "15.20.715.1234",
+        "mapId": 11,
+        "participantIdentities": [
+          {
+            "participantId": 1,
+            "player": {
+              "gameName": "PlayerOne",
+              "tagLine": "EUW",
+              "puuid": "8f3c1a2e-5b7d-4e9f-a1c3-0d2e4f6a8b9c",
+              "summonerId": 98765432
+            }
+          }
+        ],
+        "participants": [
+          {
+            "championId": 157,
+            "participantId": 1,
+            "spell1Id": 4,
+            "spell2Id": 14,
+            "teamId": 100,
+            "stats": {
+              "assists": 7,
+              "champLevel": 2,
+              "deaths": 4,
+              "goldEarned": 600,
+              "kills": 5,
+              "totalMinionsKilled": 6,
+              "win": false
+            },
+            "timeline": {
+              "lane": "MIDDLE",
+              "role": "SOLO"
+            }
+          }
+        ],
+        "platformId": "EUW1",
+        "queueId": 420,
+        "seasonId": 15
+      },
+      {
+        "gameCreation": 1761314400000,
+        "gameCreationDate": "2025-10-24T14:00:00.000Z",
+        "gameDuration": 1647,
+        "gameId": 7200000004,
+        "gameMode": "CLASSIC",
+        "gameType": "MATCHED_GAME",
+        "gameVersion": "15.20.715.1234",
+        "mapId": 11,
+        "participantIdentities": [
+          {
+            "participantId": 1,
+            "player": {
+              "gameName": "PlayerOne",
+              "tagLine": "EUW",
+              "puuid": "8f3c1a2e-5b7d-4e9f-a1c3-0d2e4f6a8b9c",
+              "summonerId": 98765432
+            }
+          }
+        ],
+        "participants": [
+          {
+            "championId": 64,
+            "participantId": 1,
+            "spell1Id": 4,
+            "spell2Id": 14,
+            "teamId": 100,
+            "stats": {
+              "assists": 7,
+              "champLevel": 16,
+              "deaths": 4,
+              "goldEarned": 12450,
+              "kills": 5,
+              "totalMinionsKilled": 187,
+              "win": true
+            },
+            "timeline": {
+              "lane": "MIDDLE",
+              "role": "SOLO"
+            }
+          }
+        ],
+        "platformId": "EUW1",
+        "queueId": 420,
+        "seasonId": 15
+      },
+      {
+        "gameCreation": 1761310800000,
+        "gameCreationDate": "2025-10-24T13:00:00.000Z",
+        "gameDuration": 1999,
+        "gameId": 7200000003,
+        "gameMode": "CLASSIC",
+        "gameType": "MATCHED_GAME",
+        "gameVersion": "15.20.715.1234",
+        "mapId": 11,
+        "participantIdentities": [
+          {
+            "participantId": 1,
+            "player": {
+              "gameName": "PlayerOne",
+              "tagLine": "EUW",
+              "puuid": "8f3c1a2e-5b7d-4e9f-a1c3-0d2e4f6a8b9c",
+              "summonerId": 98765432
+            }
+          }
+        ],
+        "participants": [
+          {
+            "championId": 25,
+            "participantId": 1,
+            "spell1Id": 4,
+            "spell2Id": 14,
+            "teamId": 100,
+            "stats": {
+              "assists": 7,
+              "champLevel": 16,
+              "deaths": 4,
+              "goldEarned": 12450,
+              "kills": 5,
+              "totalMinionsKilled": 187,
+              "win": false
+            },
+            "timeline": {
+              "lane": "MIDDLE",
+              "role": "SOLO"
+            }
+          }
+        ],
+        "platformId": "EUW1",
+        "queueId": 420,
+        "seasonId": 15
+      },
+      {
+        "gameCreation": 1761307200000,
+        "gameCreationDate": "2025-10-24T12:00:00.000Z",
+        "gameDuration": 1723,
+        "gameId": 7200000002,
+        "gameMode": "CLASSIC",
+        "gameType": "MATCHED_GAME",
+        "gameVersion": "15.20.715.1234",
+        "mapId": 11,
+        "participantIdentities": [
+          {
+            "participantId": 1,
+            "player": {
+              "gameName": "PlayerOne",
+              "tagLine": "EUW",
+              "puuid": "8f3c1a2e-5b7d-4e9f-a1c3-0d2e4f6a8b9c",
+              "summonerId": 98765432
+            }
+          }
+        ],
+        "participants": [
+          {
+            "championId": 498,
+            "participantId": 1,
+            "spell1Id": 4,
+            "spell2Id": 14,
+            "teamId": 100,
+            "stats": {
+              "assists": 7,
+              "champLevel": 16,
+              "deaths": 4,
+              "goldEarned": 12450,
+              "kills": 5,
+              "totalMinionsKilled": 187,
+              "win": true
+            },
+            "timeline": {
+              "lane": "MIDDLE",
+              "role": "SOLO"
+            }
+          }
+        ],
+        "platformId": "EUW1",
+        "queueId": 420,
+        "seasonId": 15
+      },
+      {
+        "gameCreation": 1761303600000,
+        "gameCreationDate": "2025-10-24T11:00:00.000Z",
+        "gameDuration": 1510,
+        "gameId": 7200000001,
+        "gameMode": "CLASSIC",
+        "gameType": "MATCHED_GAME",
+        "gameVersion": "15.20.715.1234",
+        "mapId": 11,
+        "participantIdentities": [
+          {
+            "participantId": 1,
+            "player": {
+              "gameName": "PlayerOne",
+              "tagLine": "EUW",
+              "puuid": "8f3c1a2e-5b7d-4e9f-a1c3-0d2e4f6a8b9c",
+              "summonerId": 98765432
+            }
+          }
+        ],
+        "participants": [
+          {
+            "championId": 81,
+            "participantId": 1,
+            "spell1Id": 4,
+            "spell2Id": 14,
+            "teamId": 100,
+            "stats": {
+              "assists": 7,
+              "champLevel": 16,
+              "deaths": 4,
+              "goldEarned": 12450,
+              "kills": 5,
+              "totalMinionsKilled": 187,
+              "win": false
+            },
+            "timeline": {
+              "lane": "MIDDLE",
+              "role": "SOLO"
+            }
+          }
+        ],
+        "platformId": "EUW1",
+        "queueId": 440,
+        "seasonId": 15
+      },
+      {
+        "gameCreation": 1761300000000,
+        "gameCreationDate": "2025-10-24T10:00:00.000Z",
+        "gameDuration": 2045,
+        "gameId": 7200000000,
+        "gameMode": "CLASSIC",
+        "gameType": "MATCHED_GAME",
+        "gameVersion": "15.20.715.1234",
+        "mapId": 11,
+        "participantIdentities": [
+          {
+            "participantId": 1,
+            "player": {
+              "gameName": "PlayerOne",
+              "tagLine": "EUW",
+              "puuid": "8f3c1a2e-5b7d-4e9f-a1c3-0d2e4f6a8b9c",
+              "summonerId": 98765432
+            }
+          }
+        ],
+        "participants": [
+          {
+            "championId": 89,
+            "participantId": 1,
+            "spell1Id": 4,
+            "spell2Id": 14,
+            "teamId": 100,
+            "stats": {
+              "assists": 7,
+              "champLevel": 16,
+              "deaths": 4,
+              "goldEarned": 12450,
+              "kills": 5,
+              "totalMinionsKilled": 187,
+              "win": false
+            },
+            "timeline": {
+              "lane": "MIDDLE",
+              "role": "SOLO"
+            }
+          }
+        ],
+        "platformId": "EUW1",
+        "queueId": 420,
+        "seasonId": 15
+      }
+    ]
+  },
+  "platformId": "EUW1"
+}
