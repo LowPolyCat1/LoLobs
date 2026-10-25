@@ -85,7 +85,7 @@ impl Outbox {
 
 #[cfg(test)]
 pub mod test_messages {
-    use crate::message::{OverlayMessage, RankedSummary, Record, RiotId, Tier};
+    use crate::message::{MatchHistory, OverlayMessage, RankedSummary, Record, RiotId, Tier};
 
     pub fn summoner(name: &str) -> OverlayMessage {
         OverlayMessage::Summoner(RiotId {
@@ -106,7 +106,10 @@ pub mod test_messages {
     }
 
     pub fn matches() -> OverlayMessage {
-        OverlayMessage::Matches(Vec::new())
+        OverlayMessage::Matches(MatchHistory {
+            games: Vec::new(),
+            streak: None,
+        })
     }
 
     pub fn json(message: &OverlayMessage) -> String {

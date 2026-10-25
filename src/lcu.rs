@@ -1,7 +1,7 @@
 use crate::config::{MatchLimit, Queue};
 use crate::message::{
-    ChampionId, Division, LadderPoints, LpChange, MatchResult, MatchSummary, OverlayMessage,
-    RankedSummary, Record, RiotId, Tier,
+    ChampionId, Division, LadderPoints, LpChange, MatchHistory, MatchResult, MatchSummary,
+    OverlayMessage, RankedSummary, Record, RiotId, Streak, Tier,
 };
 use crate::snapshot::Outbox;
 use irelia::ws::{
@@ -232,15 +232,22 @@ impl LcuParticipantStats {
     }
 }
 
-fn recent_games(history: &LcuMatchHistory, selection: Selection) -> Vec<MatchSummary> {
+fn queue_games(history: &LcuMatchHistory, queue: RankedQueue) -> Vec<MatchSummary> {
     history
         .games
         .games
         .iter()
-        .filter(|game| game.queue_id == selection.queue.queue_id)
+        .filter(|game| game.queue_id == queue.queue_id)
         .filter_map(LcuGame::summary)
-        .take(selection.match_limit.get())
         .collect()
+}
+
+// The streak uses all fetched games of the queue. The match limit only shortens the list.
+fn match_history(history: &LcuMatchHistory, selection: Selection) -> MatchHistory {
+    let mut games = queue_games(history, selection.queue);
+    let streak = Streak::from_results(games.iter().map(|game| game.result));
+    games.truncate(selection.match_limit.get());
+    MatchHistory { games, streak }
 }
 
 /// The record and the ladder position of the selected queue at one time.
@@ -505,8 +512,10 @@ fn publish_matches(data: &serde_json::Value, outbox: &Outbox, selection: Selecti
     else {
         return;
     };
-    let games = recent_games(&history, selection);
-    publish(outbox, &OverlayMessage::Matches(games));
+    publish(
+        outbox,
+        &OverlayMessage::Matches(match_history(&history, selection)),
+    );
 }
 
 fn publish(outbox: &Outbox, message: &OverlayMessage) {
@@ -563,6 +572,7 @@ async fn wait_until_disconnected(source: &impl LcuSource) {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::message::StreakKind;
     use serde_json::{Value, json};
     use std::collections::HashMap;
     use std::sync::atomic::{AtomicUsize, Ordering};
@@ -1016,7 +1026,7 @@ mod tests {
 
     #[test]
     fn flex_queue_keeps_only_flex_games() {
-        let games = recent_games(&history(MATCHES), with_limit(Queue::Flex, 20));
+        let games = match_history(&history(MATCHES), with_limit(Queue::Flex, 20)).games;
 
         assert_eq!(games, [game(81, MatchResult::Loss)]);
     }
@@ -1039,7 +1049,7 @@ mod tests {
 
     #[test]
     fn match_history_keeps_recent_solo_queue_games() {
-        let games = recent_games(&history(MATCHES), SOLO);
+        let games = match_history(&history(MATCHES), SOLO).games;
 
         assert_eq!(
             games,
@@ -1055,9 +1065,61 @@ mod tests {
 
     #[test]
     fn match_history_respects_the_limit() {
-        let games = recent_games(&history(MATCHES), with_limit(Queue::Solo, 2));
+        let games = match_history(&history(MATCHES), with_limit(Queue::Solo, 2)).games;
 
         assert_eq!(games.len(), 2);
+    }
+
+    fn solo_game(champion_id: u32, result: MatchResult) -> Value {
+        let (win, remake) = match result {
+            MatchResult::Win => (true, false),
+            MatchResult::Loss => (false, false),
+            MatchResult::Remake => (false, true),
+        };
+        json!({"queueId": 420, "participants": [{
+            "championId": champion_id,
+            "stats": {"win": win, "gameEndedInEarlySurrender": remake}
+        }]})
+    }
+
+    fn history_of(games: Vec<Value>) -> LcuMatchHistory {
+        parse(&json!({"games": {"games": games}}), MATCH_HISTORY_URI).expect("history parses")
+    }
+
+    #[test]
+    fn streak_counts_games_beyond_the_limit() {
+        let games = (1..=4).map(|id| solo_game(id, MatchResult::Loss)).collect();
+
+        let history = match_history(&history_of(games), with_limit(Queue::Solo, 2));
+
+        assert_eq!(history.games.len(), 2);
+        assert_eq!(
+            history.streak,
+            Some(Streak {
+                kind: StreakKind::Loss,
+                count: 4
+            })
+        );
+    }
+
+    #[test]
+    fn streak_ignores_games_of_other_queues() {
+        let mut games = vec![
+            solo_game(1, MatchResult::Win),
+            solo_game(2, MatchResult::Loss),
+            solo_game(3, MatchResult::Win),
+        ];
+        games[1]["queueId"] = json!(440);
+
+        let history = match_history(&history_of(games), SOLO);
+
+        assert_eq!(
+            history.streak,
+            Some(Streak {
+                kind: StreakKind::Win,
+                count: 2
+            })
+        );
     }
 
     #[test]
@@ -1067,7 +1129,7 @@ mod tests {
         let history: LcuMatchHistory =
             parse(&matches, MATCH_HISTORY_URI).expect("match history parses");
 
-        let games = recent_games(&history, SOLO);
+        let games = match_history(&history, SOLO).games;
 
         assert_eq!(games[0], game(222, MatchResult::Loss));
     }
@@ -1094,7 +1156,7 @@ mod tests {
         let history: LcuMatchHistory =
             parse(&matches, MATCH_HISTORY_URI).expect("match history parses");
 
-        let games = recent_games(&history, SOLO);
+        let games = match_history(&history, SOLO).games;
 
         assert_eq!(games[0], game(103, MatchResult::Win));
     }
@@ -1108,7 +1170,7 @@ mod tests {
         let history: LcuMatchHistory =
             parse(&matches, MATCH_HISTORY_URI).expect("match history parses");
 
-        let games = recent_games(&history, SOLO);
+        let games = match_history(&history, SOLO).games;
 
         assert_eq!(games[1], game(222, MatchResult::Remake));
     }
@@ -1159,10 +1221,10 @@ mod tests {
 
     #[test]
     fn matches_message_matches_e2e_fixture() {
-        let games = recent_games(&history(MATCHES), SOLO);
+        let matches = match_history(&history(MATCHES), SOLO);
 
         assert_eq!(
-            message_json(&OverlayMessage::Matches(games)),
+            message_json(&OverlayMessage::Matches(matches)),
             fixture(E2E_MATCHES)
         );
     }

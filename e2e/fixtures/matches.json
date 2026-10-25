@@ -1,10 +1,13 @@
 {
   "type": "matches",
-  "data": [
-    { "championId": 103, "result": "win" },
-    { "championId": 222, "result": "loss" },
-    { "championId": 157, "result": "remake" },
-    { "championId": 64, "result": "win" },
-    { "championId": 25, "result": "loss" }
-  ]
+  "data": {
+    "games": [
+      { "championId": 103, "result": "win" },
+      { "championId": 222, "result": "loss" },
+      { "championId": 157, "result": "remake" },
+      { "championId": 64, "result": "win" },
+      { "championId": 25, "result": "loss" }
+    ],
+    "streak": { "kind": "win", "count": 1 }
+  }
 }

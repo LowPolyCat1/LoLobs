@@ -1,5 +1,6 @@
 const fallbackSocketUrl = 'ws://127.0.0.1:2009/ws';
 const resultClasses = { win: 'win-border', loss: 'loss-border', remake: 'remake' };
+const streakLetters = { win: 'W', loss: 'L' };
 let socket;
 
 // A page opened as a local file has no server host, so it uses the default backend address.
@@ -13,7 +14,22 @@ function matchLimit() {
     return limit > 0 ? limit : Infinity;
 }
 
-function renderMatches(games) {
+function renderStreak(streak) {
+    const el = document.getElementById('streak');
+    if (!el) return;
+    el.classList.remove(...Object.keys(streakLetters));
+    el.hidden = !streak || streak.count < 1;
+    if (el.hidden) return;
+    el.innerText = `${streak.count}${streakLetters[streak.kind]} streak`;
+    el.classList.add(streak.kind);
+}
+
+function renderMatches(data) {
+    renderGames(data.games);
+    renderStreak(data.streak);
+}
+
+function renderGames(games) {
     const container = document.getElementById('matches-container');
     if (!container) return;
 

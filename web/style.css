@@ -202,6 +202,23 @@ body {
     align-items: center;
 }
 
+/* The streak sits under the label, so that it does not make the card wider */
+.matches-label {
+    display: flex;
+    flex-direction: column;
+    gap: 0.3rem;
+}
+
+.streak {
+    font-size: 0.7rem;
+    font-weight: 800;
+    white-space: nowrap;
+}
+
+.streak[hidden] {
+    display: none;
+}
+
 /* Match Icon Styles */
 .match-icon {
     width: 3.5rem;

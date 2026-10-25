@@ -6,7 +6,7 @@ use serde::{Deserialize, Serialize};
 pub enum OverlayMessage {
     Summoner(RiotId),
     Ranked(RankedSummary),
-    Matches(Vec<MatchSummary>),
+    Matches(MatchHistory),
 }
 
 impl OverlayMessage {
@@ -173,6 +173,17 @@ pub enum MatchResult {
     Remake,
 }
 
+impl MatchResult {
+    /// Returns `None` for a remake, because a remake does not end or extend a streak.
+    fn streak_kind(self) -> Option<StreakKind> {
+        match self {
+            Self::Win => Some(StreakKind::Win),
+            Self::Loss => Some(StreakKind::Loss),
+            Self::Remake => None,
+        }
+    }
+}
+
 #[derive(Serialize, Clone, Copy, Debug, PartialEq, Eq)]
 #[serde(rename_all = "camelCase")]
 pub struct MatchSummary {
@@ -180,9 +191,40 @@ pub struct MatchSummary {
     pub result: MatchResult,
 }
 
+#[derive(Serialize, Clone, Copy, Debug, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub enum StreakKind {
+    Win,
+    Loss,
+}
+
+/// The number of the newest games in a row with the same result.
+#[derive(Serialize, Clone, Copy, Debug, PartialEq, Eq)]
+pub struct Streak {
+    pub kind: StreakKind,
+    pub count: usize,
+}
+
+impl Streak {
+    /// Reads `results` from the newest game. Returns `None` when there is no win or loss.
+    pub fn from_results(results: impl IntoIterator<Item = MatchResult>) -> Option<Self> {
+        let mut decided = results.into_iter().filter_map(MatchResult::streak_kind);
+        let kind = decided.next()?;
+        let count = 1 + decided.take_while(|next| *next == kind).count();
+        Some(Self { kind, count })
+    }
+}
+
+#[derive(Serialize, Clone, Debug, PartialEq, Eq)]
+pub struct MatchHistory {
+    pub games: Vec<MatchSummary>,
+    pub streak: Option<Streak>,
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+    use MatchResult::{Loss, Remake, Win};
     use serde_json::json;
 
     fn to_json(message: &OverlayMessage) -> serde_json::Value {
@@ -317,15 +359,79 @@ mod tests {
 
     #[test]
     fn match_results_are_lowercase() {
-        let message = OverlayMessage::Matches(vec![MatchSummary {
-            champion_id: ChampionId(157),
-            result: MatchResult::Remake,
-        }]);
+        let message = OverlayMessage::Matches(MatchHistory {
+            games: vec![MatchSummary {
+                champion_id: ChampionId(157),
+                result: MatchResult::Remake,
+            }],
+            streak: Some(Streak {
+                kind: StreakKind::Loss,
+                count: 2,
+            }),
+        });
 
         assert_eq!(
             to_json(&message),
-            json!({"type": "matches", "data": [{"championId": 157, "result": "remake"}]})
+            json!({"type": "matches", "data": {
+                "games": [{"championId": 157, "result": "remake"}],
+                "streak": {"kind": "loss", "count": 2}
+            }})
         );
+    }
+
+    #[test]
+    fn missing_streak_is_null() {
+        let message = OverlayMessage::Matches(MatchHistory {
+            games: Vec::new(),
+            streak: None,
+        });
+
+        assert_eq!(
+            to_json(&message)["data"],
+            json!({"games": [], "streak": null})
+        );
+    }
+
+    fn streak(kind: StreakKind, count: usize) -> Option<Streak> {
+        Some(Streak { kind, count })
+    }
+
+    #[test]
+    fn streak_of_only_wins_counts_all_games() {
+        assert_eq!(
+            Streak::from_results([Win, Win, Win]),
+            streak(StreakKind::Win, 3)
+        );
+    }
+
+    #[test]
+    fn streak_ends_at_the_first_other_result() {
+        assert_eq!(
+            Streak::from_results([Loss, Loss, Win, Loss]),
+            streak(StreakKind::Loss, 2)
+        );
+        assert_eq!(
+            Streak::from_results([Win, Loss, Loss]),
+            streak(StreakKind::Win, 1)
+        );
+    }
+
+    #[test]
+    fn streak_skips_remakes() {
+        assert_eq!(
+            Streak::from_results([Remake, Win, Remake, Win, Loss]),
+            streak(StreakKind::Win, 2)
+        );
+    }
+
+    #[test]
+    fn empty_history_has_no_streak() {
+        assert_eq!(Streak::from_results([]), None);
+    }
+
+    #[test]
+    fn only_remakes_have_no_streak() {
+        assert_eq!(Streak::from_results([Remake, Remake]), None);
     }
 
     #[test]

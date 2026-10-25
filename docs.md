@@ -31,7 +31,7 @@ match_limit = 5
 Each message is one JSON text with two fields:
 
 * `type`: The message type. The value is `summoner`, `ranked` or `matches`.
-* `data`: The data of the message. The structure of `data` changes with `type`. For `matches`, `data` is a list.
+* `data`: The data of the message. The structure of `data` changes with `type`.
 
 ```json
 { "type": "summoner", "data": { "gameName": "PlayerOne", "tagLine": "EUW" } }
@@ -122,21 +122,32 @@ When the player has no data for the configured queue, the server does not send t
 
 ## 3. `matches`
 
-This message gives the last games of the player in the configured queue. The `data` field is a list. The list starts with the newest game. The `match_limit` value sets the maximum number of games.
+This message gives the last games and the current streak of the player in the configured queue.
 
 | Field | Type | Description |
 | --- | --- | --- |
-| `championId` | number | The ID of the champion that the player played. |
-| `result` | string | The result of the game: `win`, `loss` or `remake`. The value is `remake` when the game ended with an early surrender. |
+| `games` | list | The last games. The list starts with the newest game. The `match_limit` value sets the maximum number of games. |
+| `games[].championId` | number | The ID of the champion that the player played. |
+| `games[].result` | string | The result of the game: `win`, `loss` or `remake`. The value is `remake` when the game ended with an early surrender. |
+| `streak` | object or `null` | The newest games in a row with the same result. The value is `null` when the match history has no win or loss. |
+| `streak.kind` | string | The result of the streak: `win` or `loss`. |
+| `streak.count` | number | The number of games in the streak. The minimum value is 1. |
+
+The server counts the streak from all games of the configured queue in the match history that the League Client sends.
+The `match_limit` value does not change the streak. The server ignores remakes, so a remake does not stop a streak.
 
 ```json
 {
   "type": "matches",
-  "data": [
-    { "championId": 103, "result": "win" },
-    { "championId": 222, "result": "loss" },
-    { "championId": 157, "result": "remake" }
-  ]
+  "data": {
+    "games": [
+      { "championId": 103, "result": "win" },
+      { "championId": 64, "result": "win" },
+      { "championId": 157, "result": "remake" },
+      { "championId": 222, "result": "loss" }
+    ],
+    "streak": { "kind": "win", "count": 2 }
+  }
 }
 ```
 
@@ -153,6 +164,7 @@ The script `web/overlay.js` reads the `type` field of each message and updates t
    `session_winrate.html` shows `lpChange.sessionTotal`, for example `+67 LP`. When `lpChange` is not present, the page shows `-- LP`.
 3. `matches`: The script shows one champion icon for each game. The border color of the icon shows the result.
    To show fewer games, add the `matches` parameter to the page URL, for example `past_matches.html?matches=3`.
+   The script also shows the streak, for example `3W streak` in green or `2L streak` in red. When `streak` is `null`, the script hides it.
 
 The script ignores messages with an unknown `type`.
 

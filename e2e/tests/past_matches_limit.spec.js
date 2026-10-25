@@ -17,7 +17,7 @@ test('shows at most the number of icons from the matches parameter', async ({ pa
 
 test('shows all icons when the backend sends fewer games', async ({ page, backend }) => {
   const matches = loadFixture('matches');
-  await backend.send({ ...matches, data: matches.data.slice(0, 2) });
+  await backend.send({ ...matches, data: { ...matches.data, games: matches.data.games.slice(0, 2) } });
 
   await expect(page.locator('#matches-container img.match-icon')).toHaveCount(2);
 });
