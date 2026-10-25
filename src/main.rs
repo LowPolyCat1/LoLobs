@@ -1,3 +1,4 @@
+mod config;
 mod lcu;
 mod message;
 mod snapshot;
@@ -5,7 +6,10 @@ mod web_dir;
 mod ws;
 
 use actix_web::{App, HttpRequest, HttpResponse, HttpServer, web};
+use clap::Parser;
+use config::{Config, Overrides};
 use snapshot::Outbox;
+use std::net::SocketAddr;
 
 async fn ws_route(
     req: HttpRequest,
@@ -15,12 +19,32 @@ async fn ws_route(
     ws::start(&req, stream, outbox.subscribe(), outbox.snapshot())
 }
 
-const IP: &str = "127.0.0.1";
-const PORT: u16 = 2009;
+/// Prints help and version text and exits. Logs other errors and exits with code 1.
+fn parse_command_line() -> Overrides {
+    match Overrides::try_parse() {
+        Ok(overrides) => overrides,
+        Err(err) if !err.use_stderr() => err.exit(),
+        Err(err) => {
+            tracing::error!("Invalid command line: {}", err);
+            std::process::exit(1);
+        }
+    }
+}
+
+fn load_config(cli: Overrides) -> Config {
+    let exe_path = std::env::current_exe().ok();
+    config::load(exe_path.as_deref(), cli).unwrap_or_else(|err| {
+        tracing::error!("{}", err);
+        std::process::exit(1);
+    })
+}
 
 #[actix_web::main]
 async fn main() -> std::io::Result<()> {
     tracing_subscriber::fmt().init();
+
+    let config = load_config(parse_command_line());
+    let address = SocketAddr::new(config.ip, config.port);
 
     if rustls::crypto::ring::default_provider()
         .install_default()
@@ -32,13 +56,16 @@ async fn main() -> std::io::Result<()> {
 
     let outbox = Outbox::new(32);
 
-    lcu::spawn_lcu_listener(outbox.clone());
+    lcu::spawn_lcu_listener(
+        outbox.clone(),
+        lcu::Selection::new(config.queue, config.match_limit),
+    );
 
-    tracing::info!("Starting Overlay Server on {}:{}", IP, PORT);
+    tracing::info!("Starting Overlay Server on {}", address);
 
     let web_dir = web_dir::resolve();
     if let Some(dir) = &web_dir {
-        web_dir::log_page_urls(dir, IP, PORT);
+        web_dir::log_page_urls(dir, address);
     }
 
     HttpServer::new(move || {
@@ -48,7 +75,7 @@ async fn main() -> std::io::Result<()> {
             .configure(|cfg| web_dir::configure(cfg, web_dir.as_deref()))
     })
     .workers(1)
-    .bind((IP, PORT))?
+    .bind(address)?
     .run()
     .await
 }
