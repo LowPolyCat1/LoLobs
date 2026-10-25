@@ -611,7 +611,6 @@ mod tests {
     use crate::message::StreakKind;
     use serde_json::{Value, json};
     use std::collections::HashMap;
-    use std::sync::atomic::{AtomicUsize, Ordering};
 
     const SUMMONER: &str = include_str!("../tests/fixtures/summoner.json");
     const RANKED_STATS: &str = include_str!("../tests/fixtures/ranked_stats.json");
@@ -633,7 +632,7 @@ mod tests {
 
     struct MockSource {
         responses: HashMap<&'static str, Value>,
-        summoner_checks_left: AtomicUsize,
+        summoner_checks_left: Mutex<usize>,
         events: Vec<EventData>,
     }
 
@@ -646,7 +645,7 @@ mod tests {
             ]);
             Self {
                 responses,
-                summoner_checks_left: AtomicUsize::new(summoner_checks),
+                summoner_checks_left: Mutex::new(summoner_checks),
                 events: Vec::new(),
             }
         }
@@ -654,7 +653,7 @@ mod tests {
         fn not_running() -> Self {
             Self {
                 responses: HashMap::new(),
-                summoner_checks_left: AtomicUsize::new(0),
+                summoner_checks_left: Mutex::new(0),
                 events: Vec::new(),
             }
         }
@@ -665,9 +664,15 @@ mod tests {
         }
 
         fn take_summoner_check(&self) -> bool {
-            self.summoner_checks_left
-                .fetch_update(Ordering::SeqCst, Ordering::SeqCst, |n| n.checked_sub(1))
-                .is_ok()
+            let mut left = self
+                .summoner_checks_left
+                .lock()
+                .expect("counter lock is not poisoned");
+            let Some(next) = left.checked_sub(1) else {
+                return false;
+            };
+            *left = next;
+            true
         }
     }
 
