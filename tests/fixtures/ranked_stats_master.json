@@ -1,0 +1,35 @@
+{
+  "earnedRegaliaRewardIds": [],
+  "highestCurrentSeasonReachedTierSR": "MASTER",
+  "highestPreviousSeasonEndDivision": "I",
+  "highestPreviousSeasonEndTier": "DIAMOND",
+  "queueMap": {},
+  "queues": [
+    {
+      "division": "NA",
+      "highestDivision": "NA",
+      "highestTier": "MASTER",
+      "isProvisional": false,
+      "leaguePoints": 213,
+      "losses": 141,
+      "miniSeriesProgress": "",
+      "previousSeasonEndDivision": "I",
+      "previousSeasonEndTier": "DIAMOND",
+      "provisionalGameThreshold": 5,
+      "provisionalGamesRemaining": 0,
+      "queueType": "RANKED_SOLO_5x5",
+      "ratedRating": 0,
+      "ratedTier": "NONE",
+      "tier": "MASTER",
+      "warnings": null,
+      "wins": 162
+    }
+  ],
+  "rankedRegaliaLevel": 0,
+  "seasons": {},
+  "splitsProgress": {},
+  "session": {
+    "wins": 0,
+    "losses": 0
+  }
+}
