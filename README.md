@@ -108,9 +108,10 @@ When the file or a value is not valid, the overlay server logs an error and stop
 ### Session
 
 The overlay server keeps the session data in the file `session.json` in the folder of `LoLobs.exe`.
-When you start the overlay server again, it uses the same session if these two conditions are true:
+When you start the overlay server again, it uses the same session if these three conditions are true:
 
 * The same account is logged in to the League Client.
+* The `queue` setting has the same value.
 * The date on your computer is the same day.
 
 When one of these conditions is false, the overlay server starts a new session.
