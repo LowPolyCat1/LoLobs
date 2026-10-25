@@ -1,7 +1,7 @@
-use crate::lcu::fetch_endpoint;
+use crate::snapshot::SharedSnapshot;
 use actix_web::{HttpRequest, HttpResponse, web};
-use actix_ws::{Message, MessageStream, Session};
-use tokio::sync::broadcast;
+use actix_ws::{Closed, Message, MessageStream, Session};
+use tokio::sync::broadcast::{self, error::RecvError};
 
 enum Flow {
     Continue,
@@ -12,11 +12,11 @@ pub fn start(
     req: &HttpRequest,
     stream: web::Payload,
     receiver: broadcast::Receiver<String>,
+    snapshot: SharedSnapshot,
 ) -> Result<HttpResponse, actix_web::Error> {
     let (response, session, messages) = actix_ws::handle(req, stream)?;
 
-    actix_web::rt::spawn(send_initial_state(session.clone()));
-    actix_web::rt::spawn(run_session(session, messages, receiver));
+    actix_web::rt::spawn(run_session(session, messages, receiver, snapshot));
 
     Ok(response)
 }
@@ -25,35 +25,56 @@ async fn run_session(
     session: Session,
     messages: MessageStream,
     receiver: broadcast::Receiver<String>,
+    snapshot: SharedSnapshot,
 ) {
     tokio::select! {
-        _ = forward_broadcasts(session.clone(), receiver) => {}
+        _ = send_snapshot_then_forward(session.clone(), receiver, snapshot) => {}
         _ = handle_incoming(session.clone(), messages) => {}
     }
 
     let _ = session.close(None).await;
 }
 
-async fn send_initial_state(mut session: Session) {
-    let ranked = fetch_endpoint("/lol-ranked/v1/current-ranked-stats").await;
-    let summoner = fetch_endpoint("/lol-summoner/v1/current-summoner").await;
-
-    send_optional(&mut session, ranked).await;
-    send_optional(&mut session, summoner).await;
-}
-
-async fn send_optional(session: &mut Session, value: Option<serde_json::Value>) {
-    let Some(value) = value else {
+async fn send_snapshot_then_forward(
+    mut session: Session,
+    receiver: broadcast::Receiver<String>,
+    snapshot: SharedSnapshot,
+) {
+    if send_all(&mut session, snapshot.messages()).await.is_err() {
         return;
-    };
-    let _ = session.text(value.to_string()).await;
+    }
+    forward_broadcasts(session, receiver, snapshot).await;
 }
 
-// Known bug #10: a lagged receiver also ends the stream. Kept until that issue is fixed.
-async fn forward_broadcasts(mut session: Session, mut receiver: broadcast::Receiver<String>) {
-    while let Ok(msg) = receiver.recv().await
-        && session.text(msg).await.is_ok()
+async fn send_all(session: &mut Session, messages: Vec<String>) -> Result<(), Closed> {
+    for msg in messages {
+        session.text(msg).await?;
+    }
+    Ok(())
+}
+
+async fn forward_broadcasts(
+    mut session: Session,
+    mut receiver: broadcast::Receiver<String>,
+    snapshot: SharedSnapshot,
+) {
+    while let Some(messages) = next_messages(receiver.recv().await, &snapshot)
+        && send_all(&mut session, messages).await.is_ok()
     {}
+}
+
+fn next_messages(
+    received: Result<String, RecvError>,
+    snapshot: &SharedSnapshot,
+) -> Option<Vec<String>> {
+    match received {
+        Ok(msg) => Some(vec![msg]),
+        Err(RecvError::Lagged(skipped)) => {
+            tracing::warn!(target: "ws", "Client skipped {} broadcast messages. Resending snapshot.", skipped);
+            Some(snapshot.messages())
+        }
+        Err(RecvError::Closed) => None,
+    }
 }
 
 async fn handle_incoming(mut session: Session, mut messages: MessageStream) {
@@ -73,5 +94,51 @@ async fn handle_message(session: &mut Session, msg: Message) -> Flow {
             Flow::Stop
         }
         _ => Flow::Continue,
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::snapshot::{Outbox, Topic};
+
+    #[test]
+    fn received_message_is_forwarded() {
+        let outbox = Outbox::new(8);
+
+        let messages = next_messages(Ok("ranked".to_string()), &outbox.snapshot());
+
+        assert_eq!(messages, Some(vec!["ranked".to_string()]));
+    }
+
+    #[test]
+    fn closed_channel_stops_forwarding() {
+        let outbox = Outbox::new(8);
+
+        assert_eq!(
+            next_messages(Err(RecvError::Closed), &outbox.snapshot()),
+            None
+        );
+    }
+
+    #[tokio::test]
+    async fn lagged_client_receives_snapshot() {
+        let outbox = Outbox::new(1);
+        let mut receiver = outbox.subscribe();
+        outbox.publish(Topic::Summoner, "summoner".to_string());
+        outbox.publish(Topic::RankedStats, "ranked".to_string());
+        outbox.publish(Topic::MatchHistory, "matches".to_string());
+
+        let received = receiver.recv().await;
+        let messages = next_messages(received, &outbox.snapshot());
+
+        assert_eq!(
+            messages,
+            Some(vec![
+                "summoner".to_string(),
+                "ranked".to_string(),
+                "matches".to_string()
+            ])
+        );
     }
 }
