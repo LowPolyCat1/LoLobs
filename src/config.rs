@@ -156,11 +156,9 @@ impl fmt::Display for ConfigError {
     }
 }
 
-/// Returns the path of the config file next to the executable.
-fn config_path(exe_path: Option<&Path>) -> Option<PathBuf> {
-    exe_path
-        .and_then(Path::parent)
-        .map(|dir| dir.join(CONFIG_FILE_NAME))
+/// Returns the path of the file `name` in the folder of the executable.
+pub fn next_to_exe(exe_path: Option<&Path>, name: &str) -> Option<PathBuf> {
+    exe_path.and_then(Path::parent).map(|dir| dir.join(name))
 }
 
 /// Returns `None` when the file does not exist.
@@ -194,7 +192,7 @@ fn load_file(path: Option<&Path>) -> Result<Overrides, ConfigError> {
 
 /// Reads the config file next to `exe_path` and applies the command line values on top of it.
 pub fn load(exe_path: Option<&Path>, cli: Overrides) -> Result<Config, ConfigError> {
-    let file = load_file(config_path(exe_path).as_deref())?;
+    let file = load_file(next_to_exe(exe_path, CONFIG_FILE_NAME).as_deref())?;
     Ok(Config::from(cli.or(file)))
 }
 
