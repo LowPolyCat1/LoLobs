@@ -26,7 +26,6 @@ const RANKED_QUEUE: RankedQueue = RankedQueue {
     queue_id: QueueId(420),
 };
 const MATCH_LIMIT: usize = 5;
-const REMAKE_MAX_DURATION_SECS: u64 = 300;
 
 #[derive(Deserialize, Clone, Copy, Debug, PartialEq, Eq)]
 #[serde(transparent)]
@@ -153,7 +152,6 @@ struct LcuGameList {
 #[serde(rename_all = "camelCase")]
 struct LcuGame {
     queue_id: QueueId,
-    game_duration: u64,
     participants: Vec<LcuParticipant>,
 }
 
@@ -163,18 +161,8 @@ impl LcuGame {
         let participant = self.participants.first()?;
         Some(MatchSummary {
             champion_id: participant.champion_id,
-            result: self.result(&participant.stats),
+            result: participant.stats.result(),
         })
-    }
-
-    fn result(&self, stats: &LcuParticipantStats) -> MatchResult {
-        if self.game_duration <= REMAKE_MAX_DURATION_SECS {
-            return MatchResult::Remake;
-        }
-        if stats.win {
-            return MatchResult::Win;
-        }
-        MatchResult::Loss
     }
 }
 
@@ -186,8 +174,23 @@ struct LcuParticipant {
 }
 
 #[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
 struct LcuParticipantStats {
     win: bool,
+    #[serde(default)]
+    game_ended_in_early_surrender: bool,
+}
+
+impl LcuParticipantStats {
+    // The LCU flags a remake as an early surrender. A limit on the game duration
+    // was rejected: it only guesses and can misclassify games.
+    fn result(&self) -> MatchResult {
+        match (self.game_ended_in_early_surrender, self.win) {
+            (true, _) => MatchResult::Remake,
+            (false, true) => MatchResult::Win,
+            (false, false) => MatchResult::Loss,
+        }
+    }
 }
 
 fn recent_games(history: &LcuMatchHistory, queue: RankedQueue, limit: usize) -> Vec<MatchSummary> {
@@ -812,6 +815,53 @@ mod tests {
         let games = recent_games(&history, RANKED_QUEUE, MATCH_LIMIT);
 
         assert_eq!(games[0], game(222, MatchResult::Loss));
+    }
+
+    fn result_of(stats: Value) -> MatchResult {
+        serde_json::from_value::<LcuParticipantStats>(stats)
+            .expect("stats parse")
+            .result()
+    }
+
+    #[test]
+    fn early_surrender_is_a_remake_for_both_teams() {
+        let lost = json!({"win": false, "gameEndedInEarlySurrender": true});
+        let won = json!({"win": true, "gameEndedInEarlySurrender": true});
+
+        assert_eq!(result_of(lost), MatchResult::Remake);
+        assert_eq!(result_of(won), MatchResult::Remake);
+    }
+
+    #[test]
+    fn short_game_without_early_surrender_is_not_a_remake() {
+        let mut matches = fixture(MATCHES);
+        matches["games"]["games"][0]["gameDuration"] = json!(200);
+        let history: LcuMatchHistory =
+            parse(&matches, MATCH_HISTORY_URI).expect("match history parses");
+
+        let games = recent_games(&history, RANKED_QUEUE, MATCH_LIMIT);
+
+        assert_eq!(games[0], game(103, MatchResult::Win));
+    }
+
+    #[test]
+    fn long_game_with_early_surrender_is_a_remake() {
+        let mut matches = fixture(MATCHES);
+        matches["games"]["games"][1]["gameDuration"] = json!(400);
+        matches["games"]["games"][1]["participants"][0]["stats"]["gameEndedInEarlySurrender"] =
+            json!(true);
+        let history: LcuMatchHistory =
+            parse(&matches, MATCH_HISTORY_URI).expect("match history parses");
+
+        let games = recent_games(&history, RANKED_QUEUE, MATCH_LIMIT);
+
+        assert_eq!(games[1], game(222, MatchResult::Remake));
+    }
+
+    #[test]
+    fn missing_early_surrender_flag_uses_win() {
+        assert_eq!(result_of(json!({"win": true})), MatchResult::Win);
+        assert_eq!(result_of(json!({"win": false})), MatchResult::Loss);
     }
 
     #[test]

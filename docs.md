@@ -92,7 +92,7 @@ This message gives the last Ranked Solo/Duo games of the player. The `data` fiel
 | Field | Type | Description |
 | --- | --- | --- |
 | `championId` | number | The ID of the champion that the player played. |
-| `result` | string | The result of the game: `win`, `loss` or `remake`. |
+| `result` | string | The result of the game: `win`, `loss` or `remake`. The value is `remake` when the game ended with an early surrender. |
 
 ```json
 {
