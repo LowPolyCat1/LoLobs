@@ -1,0 +1,25 @@
+name: release
+
+on:
+  push:
+    tags: ["v*"]
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v5
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+      - run: cargo build --release
+      - name: Package
+        shell: pwsh
+        run: |
+          $files = @("target/release/LoLobs.exe", "overlay.js", "style.css") + (Get-ChildItem -Path *.html).FullName
+          Compress-Archive -Path $files -DestinationPath "LoLobs-${{ github.ref_name }}-windows.zip"
+      - uses: softprops/action-gh-release@v2
+        with:
+          files: LoLobs-${{ github.ref_name }}-windows.zip
