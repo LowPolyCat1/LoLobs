@@ -67,6 +67,51 @@ body {
     filter: drop-shadow(0 0 1rem rgba(0, 0, 0, 1));
 }
 
+/* Rank change animations: the base transform scale(1.4) is the 1x state */
+#rank-icon.rank-promotion {
+    animation: rank-promotion 1.2s ease-in-out;
+}
+
+#rank-icon.rank-demotion {
+    animation: rank-demotion 0.8s ease-in-out;
+}
+
+/* Same filter list in each frame, so that the gold glow interpolates */
+@keyframes rank-promotion {
+    0%, 100% {
+        transform: scale(1.4);
+        filter: drop-shadow(0 0 1rem rgba(0, 0, 0, 1)) drop-shadow(0 0 0.6rem rgba(200, 170, 110, 0));
+    }
+    50% {
+        transform: scale(1.75);
+        filter: drop-shadow(0 0 1rem rgba(0, 0, 0, 1)) drop-shadow(0 0 0.6rem rgba(200, 170, 110, 1));
+    }
+}
+
+@keyframes rank-demotion {
+    0%, 100% {
+        transform: scale(1.4) translateX(0);
+        filter: drop-shadow(0 0 1rem rgba(0, 0, 0, 1)) brightness(1);
+    }
+    15% {
+        transform: scale(1.4) translateX(-0.25rem);
+        filter: drop-shadow(0 0 1rem rgba(0, 0, 0, 1)) brightness(0.45);
+    }
+    30% {
+        transform: scale(1.4) translateX(0.25rem);
+    }
+    45% {
+        transform: scale(1.4) translateX(-0.2rem);
+    }
+    60% {
+        transform: scale(1.4) translateX(0.15rem);
+        filter: drop-shadow(0 0 1rem rgba(0, 0, 0, 1)) brightness(0.45);
+    }
+    75% {
+        transform: scale(1.4) translateX(0);
+    }
+}
+
 .text-group {
     display: flex;
     flex-direction: column;
@@ -114,6 +159,21 @@ body {
     color: var(--hextech-gold);
 }
 
+.lp-row {
+    display: flex;
+    align-items: baseline;
+    gap: 0.8rem;
+}
+
+.lp-change {
+    font-size: 1.4rem;
+    font-weight: 800;
+}
+
+.lp-change[hidden] {
+    display: none;
+}
+
 /* Winrate Stats Layout */
 .stat-group {
     display: flex;
@@ -140,6 +200,23 @@ body {
     display: flex;
     gap: 1rem;
     align-items: center;
+}
+
+/* The streak sits under the label, so that it does not make the card wider */
+.matches-label {
+    display: flex;
+    flex-direction: column;
+    gap: 0.3rem;
+}
+
+.streak {
+    font-size: 0.7rem;
+    font-weight: 800;
+    white-space: nowrap;
+}
+
+.streak[hidden] {
+    display: none;
 }
 
 /* Match Icon Styles */

@@ -1,0 +1,19 @@
+# Example configuration for LoLobs.
+# To use it, rename this file to config.toml and keep it next to LoLobs.exe.
+# Remove a key to use its default value.
+
+# The IP address of the overlay server.
+ip = "127.0.0.1"
+
+# The port of the overlay server.
+port = 2009
+
+# The ranked queue that the overlay shows: "solo" (Ranked Solo/Duo) or "flex" (Ranked Flex).
+queue = "solo"
+
+# The maximum number of games in the match history, from 1 to 20.
+match_limit = 5
+
+# Save the session stats to session.json next to LoLobs.exe.
+# After a restart on the same day, the server continues the session of the same account.
+persist_session = true
