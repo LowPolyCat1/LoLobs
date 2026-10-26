@@ -1,0 +1,7 @@
+{
+  "type": "phase",
+  "data": {
+    "label": "In Queue",
+    "queue": "Ranked Solo/Duo"
+  }
+}

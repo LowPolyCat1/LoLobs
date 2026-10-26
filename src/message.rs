@@ -7,6 +7,8 @@ pub enum OverlayMessage {
     Summoner(RiotId),
     Ranked(RankedSummary),
     Matches(MatchHistory),
+    /// `None` serializes as `"data": null` and tells the overlay to hide the phase.
+    Phase(Option<GamePhase>),
 }
 
 impl OverlayMessage {
@@ -15,6 +17,7 @@ impl OverlayMessage {
             Self::Summoner(_) => "summoner",
             Self::Ranked(_) => "ranked",
             Self::Matches(_) => "matches",
+            Self::Phase(_) => "phase",
         }
     }
 }
@@ -220,6 +223,24 @@ impl Streak {
 pub struct MatchHistory {
     pub games: Vec<MatchSummary>,
     pub streak: Option<Streak>,
+}
+
+/// The text that the overlay shows for a client phase, for example "In Queue".
+#[derive(Serialize, Clone, Debug, PartialEq, Eq)]
+#[serde(transparent)]
+pub struct PhaseLabel(pub String);
+
+/// The readable name of a queue, for example "Ranked Solo/Duo".
+#[derive(Serialize, Clone, Debug, PartialEq, Eq)]
+#[serde(transparent)]
+pub struct QueueName(pub String);
+
+#[derive(Serialize, Clone, Debug, PartialEq, Eq)]
+pub struct GamePhase {
+    pub label: PhaseLabel,
+    /// Not present when the client has no queue for the phase.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub queue: Option<QueueName>,
 }
 
 #[cfg(test)]
@@ -433,6 +454,37 @@ mod tests {
     #[test]
     fn only_remakes_have_no_streak() {
         assert_eq!(Streak::from_results([Remake, Remake]), None);
+    }
+
+    #[test]
+    fn phase_message_has_label_and_queue() {
+        let message = OverlayMessage::Phase(Some(GamePhase {
+            label: PhaseLabel("In Queue".to_string()),
+            queue: Some(QueueName("Ranked Solo/Duo".to_string())),
+        }));
+
+        assert_eq!(
+            to_json(&message),
+            json!({"type": "phase", "data": {"label": "In Queue", "queue": "Ranked Solo/Duo"}})
+        );
+    }
+
+    #[test]
+    fn phase_without_queue_omits_queue() {
+        let message = OverlayMessage::Phase(Some(GamePhase {
+            label: PhaseLabel("In Lobby".to_string()),
+            queue: None,
+        }));
+
+        assert_eq!(to_json(&message)["data"], json!({"label": "In Lobby"}));
+    }
+
+    #[test]
+    fn no_phase_has_null_data() {
+        assert_eq!(
+            to_json(&OverlayMessage::Phase(None)),
+            json!({"type": "phase", "data": null})
+        );
     }
 
     #[test]
