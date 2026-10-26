@@ -243,3 +243,26 @@ body {
     border-color: #888 !important;
     opacity: 0.7;
 }
+
+/* Phase page */
+.phase-row {
+    display: flex;
+    align-items: baseline;
+    white-space: nowrap;
+}
+
+.phase-queue {
+    font-size: 1.4rem;
+    font-weight: 600;
+    color: var(--text-primary);
+}
+
+.phase-queue::before {
+    content: "\00B7";
+    margin: 0 0.8rem;
+    color: var(--text-secondary);
+}
+
+.phase-queue[hidden] {
+    display: none;
+}

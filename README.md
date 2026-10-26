@@ -16,6 +16,7 @@ LoLobs works only on Windows. The `irelia` crate does not build for Linux.
 * **Season stats:** The overlay shows your wins, losses and win rate for this season.
 * **Session stats:** The overlay shows your wins, losses, win rate and LP change for the current session.
 * **Recent games:** The overlay shows the champions of your last games, the result of each game and your current streak.
+* **Client phase:** The overlay shows the phase of the League Client and the queue, for example `In Queue · Ranked Solo/Duo`.
 
 ---
 
@@ -74,6 +75,7 @@ When the overlay server starts, it logs the URL of each overlay page.
 | Season win rate | `http://127.0.0.1:2009/season_winrate.html` | Your wins, losses and win rate for this season. |
 | Session win rate | `http://127.0.0.1:2009/session_winrate.html` | Your wins, losses, win rate and total LP change for the current session. |
 | Past matches | `http://127.0.0.1:2009/past_matches.html` | The champions of your last games, the result of each game and your current win or loss streak. |
+| Client phase | `http://127.0.0.1:2009/phase.html` | The phase of the League Client and the queue, for example `Champ Select · Ranked Flex`. When the League Client has no phase or is closed, the page is empty. |
 
 To show fewer games on the past matches page, add the `matches` parameter to the URL.
 For example, `http://127.0.0.1:2009/past_matches.html?matches=3` shows a maximum of 3 games.
@@ -126,9 +128,9 @@ When one of these conditions is false, the overlay server starts a new session.
 LoLobs has three parts:
 
 1. **League Client listener:** The overlay server uses the `irelia` crate to find the League Client on your computer.
-   It subscribes to the events for the summoner, the ranked stats and the match history.
+   It subscribes to the events for the summoner, the ranked stats, the match history and the gameflow session.
 2. **Overlay server:** The overlay server is a Rust program that uses Actix Web.
-   It changes the League Client data into typed messages: `summoner`, `ranked` and `matches`.
+   It changes the League Client data into typed messages: `summoner`, `ranked`, `matches` and `phase`.
    It sends each message to all connected overlay pages.
    When an overlay page connects, the overlay server sends the last message of each type.
 3. **Overlay pages:** The overlay pages are HTML pages in the `web` folder.
