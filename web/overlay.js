@@ -160,6 +160,18 @@ function renderRanked(data) {
     renderSessionLp(data.lpChange);
 }
 
+// The phase card has its own visibility: a phase message with null data hides it.
+function renderPhase(data) {
+    const card = document.getElementById('phase-card');
+    if (!card) return;
+    card.classList.toggle('visible', Boolean(data));
+    if (!data) return;
+    document.getElementById('phase-label').innerText = data.label;
+    const queueEl = document.getElementById('phase-queue');
+    queueEl.hidden = !data.queue;
+    queueEl.innerText = data.queue || '';
+}
+
 function handleMessage(msg) {
     switch (msg.type) {
         case 'summoner':
@@ -171,13 +183,16 @@ function handleMessage(msg) {
         case 'matches':
             renderMatches(msg.data);
             break;
+        case 'phase':
+            renderPhase(msg.data);
+            return;
         default:
             console.warn("Unknown overlay message type:", msg.type);
             return;
     }
 
     // Reveal cards once data arrives
-    document.querySelectorAll('.overlay-card').forEach(el => el.classList.add('visible'));
+    document.querySelectorAll('.overlay-card:not(#phase-card)').forEach(el => el.classList.add('visible'));
 }
 
 function connect() {

@@ -5,11 +5,12 @@ use std::net::SocketAddr;
 use std::path::{Path, PathBuf};
 
 const WEB_DIR_NAME: &str = "web";
-const PAGES: [&str; 4] = [
+const PAGES: [&str; 5] = [
     "current_rank.html",
     "season_winrate.html",
     "session_winrate.html",
     "past_matches.html",
+    "phase.html",
 ];
 
 /// Returns the possible overlay folders in priority order: next to the executable, then in `cwd`.
