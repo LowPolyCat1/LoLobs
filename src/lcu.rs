@@ -1,7 +1,8 @@
 use crate::config::{MatchLimit, Queue};
 use crate::message::{
-    ChampionId, Division, LadderPoints, LpChange, MatchHistory, MatchResult, MatchSummary,
-    OverlayMessage, RankedSummary, Record, RiotId, Streak, Tier,
+    ChampionId, Division, GamePhase, LadderPoints, LpChange, MatchHistory, MatchResult,
+    MatchSummary, OverlayMessage, PhaseLabel, QueueName, RankedSummary, Record, RiotId, Streak,
+    Tier,
 };
 use crate::session::{SessionOwner, SessionStore};
 use crate::snapshot::Outbox;
@@ -23,6 +24,7 @@ type ConcreteLcuClient = irelia::rest::LcuClient<irelia::requests::RequestClient
 const SUMMONER_URI: &str = "/lol-summoner/v1/current-summoner";
 const RANKED_STATS_URI: &str = "/lol-ranked/v1/current-ranked-stats";
 const MATCH_HISTORY_URI: &str = "/lol-match-history/v1/products/lol/current-summoner/matches";
+const GAMEFLOW_SESSION_URI: &str = "/lol-gameflow/v1/session";
 const RETRY_DELAY: Duration = Duration::from_secs(5);
 
 #[derive(Serialize, Deserialize, Clone, Copy, Debug, PartialEq, Eq)]
@@ -252,6 +254,118 @@ fn match_history(history: &LcuMatchHistory, selection: Selection) -> MatchHistor
     MatchHistory { games, streak }
 }
 
+/// The gameflow phase of the League Client.
+#[derive(Deserialize, Clone, Debug, Default, PartialEq, Eq)]
+#[serde(from = "String")]
+enum GameflowPhase {
+    #[default]
+    None,
+    Lobby,
+    Matchmaking,
+    ReadyCheck,
+    ChampSelect,
+    GameStart,
+    InProgress,
+    Reconnect,
+    WaitingForStats,
+    PreEndOfGame,
+    EndOfGame,
+    /// A phase that this list does not know. The overlay shows the raw value.
+    Other(String),
+}
+
+impl From<String> for GameflowPhase {
+    fn from(value: String) -> Self {
+        match value.as_str() {
+            "" | "None" => Self::None,
+            "Lobby" => Self::Lobby,
+            "Matchmaking" => Self::Matchmaking,
+            "ReadyCheck" => Self::ReadyCheck,
+            "ChampSelect" => Self::ChampSelect,
+            "GameStart" => Self::GameStart,
+            "InProgress" => Self::InProgress,
+            "Reconnect" => Self::Reconnect,
+            "WaitingForStats" => Self::WaitingForStats,
+            "PreEndOfGame" => Self::PreEndOfGame,
+            "EndOfGame" => Self::EndOfGame,
+            _ => Self::Other(value),
+        }
+    }
+}
+
+impl GameflowPhase {
+    /// Returns `None` when the client has no phase, so that the overlay hides the phase.
+    fn label(&self) -> Option<PhaseLabel> {
+        let text = match self {
+            Self::None => return None,
+            Self::Lobby => "In Lobby",
+            Self::Matchmaking => "In Queue",
+            Self::ReadyCheck => "Match Found",
+            Self::ChampSelect => "Champ Select",
+            Self::GameStart => "Loading",
+            Self::InProgress => "In Game",
+            Self::Reconnect => "Reconnect",
+            Self::WaitingForStats | Self::PreEndOfGame | Self::EndOfGame => "Post Game",
+            Self::Other(raw) => raw,
+        };
+        Some(PhaseLabel(text.to_string()))
+    }
+}
+
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct LcuGameflowSession {
+    #[serde(default)]
+    phase: GameflowPhase,
+    game_data: Option<LcuGameData>,
+}
+
+impl LcuGameflowSession {
+    fn game_phase(&self) -> Option<GamePhase> {
+        Some(GamePhase {
+            label: self.phase.label()?,
+            queue: self.queue_name(),
+        })
+    }
+
+    fn queue_name(&self) -> Option<QueueName> {
+        self.game_data.as_ref()?.queue.as_ref()?.name()
+    }
+}
+
+#[derive(Deserialize)]
+struct LcuGameData {
+    queue: Option<LcuGameQueue>,
+}
+
+#[derive(Deserialize)]
+struct LcuGameQueue {
+    #[serde(default)]
+    id: i64,
+    #[serde(default)]
+    description: String,
+    #[serde(default)]
+    name: String,
+}
+
+impl LcuGameQueue {
+    /// The client uses the IDs -1 and 0 when no queue is selected.
+    fn name(&self) -> Option<QueueName> {
+        if self.id <= 0 {
+            return None;
+        }
+        [&self.description, &self.name]
+            .into_iter()
+            .find(|text| !text.is_empty())
+            .map(|text| QueueName(text.clone()))
+    }
+}
+
+/// A deleted session has `null` data. This counts as no phase.
+fn game_phase(session: Option<LcuGameflowSession>) -> Option<GamePhase> {
+    session?.game_phase()
+}
+
 /// The record and the ladder position of the selected queue at one time.
 #[derive(Serialize, Deserialize, Clone, Copy, Debug, PartialEq, Eq)]
 pub struct Standing {
@@ -465,6 +579,7 @@ async fn run_listener_cycle(
     }
 
     tracing::warn!(target: "lcu_monitor", "LCU connection lost. Retrying...");
+    publish(outbox, &OverlayMessage::Phase(None));
 }
 
 async fn process_events(
@@ -513,6 +628,7 @@ fn handle_lcu_event(
         RANKED_STATS_URI => publish_ranked_stats(&payload.data, outbox, state, selection),
         SUMMONER_URI => publish_summoner(&payload.data, outbox),
         MATCH_HISTORY_URI => publish_matches(&payload.data, outbox, selection),
+        GAMEFLOW_SESSION_URI => publish_phase(&payload.data, outbox),
         _ => {}
     }
 }
@@ -553,6 +669,15 @@ fn publish_matches(data: &serde_json::Value, outbox: &Outbox, selection: Selecti
     );
 }
 
+fn publish_phase(data: &serde_json::Value, outbox: &Outbox) {
+    let Ok(session) =
+        parse::<Option<LcuGameflowSession>>(data, GAMEFLOW_SESSION_URI).inspect_err(log_data_error)
+    else {
+        return;
+    };
+    publish(outbox, &OverlayMessage::Phase(game_phase(session)));
+}
+
 fn publish(outbox: &Outbox, message: &OverlayMessage) {
     if let Err(err) = outbox.publish(message) {
         tracing::error!(target: "overlay_update", "Cannot serialize the {} message: {}", message.name(), err);
@@ -570,6 +695,16 @@ async fn send_initial_sync(
     sync_summoner(source, outbox).await;
     sync_ranked_stats(source, outbox, state, selection).await;
     sync_recent_matches(source, outbox, selection).await;
+    sync_phase(source, outbox).await;
+}
+
+// The client answers with an error when it has no gameflow session. This counts as no phase.
+async fn sync_phase(source: &impl LcuSource, outbox: &Outbox) {
+    let session = source
+        .fetch(GAMEFLOW_SESSION_URI)
+        .await
+        .unwrap_or(serde_json::Value::Null);
+    publish_phase(&session, outbox);
 }
 
 async fn sync_summoner(source: &impl LcuSource, outbox: &Outbox) {
@@ -629,6 +764,25 @@ mod tests {
     const E2E_RANKED: &str = include_str!("../e2e/fixtures/ranked.json");
     const E2E_RANKED_MASTER: &str = include_str!("../e2e/fixtures/ranked_master.json");
     const E2E_MATCHES: &str = include_str!("../e2e/fixtures/matches.json");
+    const E2E_PHASE_IN_QUEUE: &str = include_str!("../e2e/fixtures/phase_in_queue.json");
+    const E2E_PHASE_CHAMP_SELECT: &str = include_str!("../e2e/fixtures/phase_champ_select.json");
+    const E2E_PHASE_LABEL_ONLY: &str = include_str!("../e2e/fixtures/phase_label_only.json");
+    const E2E_PHASE_NONE: &str = include_str!("../e2e/fixtures/phase_none.json");
+
+    const GAMEFLOW_LOBBY_SOLO: &str =
+        include_str!("../tests/fixtures/gameflow_session_lobby_solo.json");
+    const GAMEFLOW_MATCHMAKING_SOLO: &str =
+        include_str!("../tests/fixtures/gameflow_session_matchmaking_solo.json");
+    const GAMEFLOW_CHAMP_SELECT_FLEX: &str =
+        include_str!("../tests/fixtures/gameflow_session_champ_select_flex.json");
+    const GAMEFLOW_IN_PROGRESS_ARAM: &str =
+        include_str!("../tests/fixtures/gameflow_session_in_progress_aram.json");
+    const GAMEFLOW_NONE: &str = include_str!("../tests/fixtures/gameflow_session_none.json");
+    const GAMEFLOW_UNKNOWN_PHASE: &str =
+        include_str!("../tests/fixtures/gameflow_session_unknown_phase.json");
+    const GAMEFLOW_NO_QUEUE: &str =
+        include_str!("../tests/fixtures/gameflow_session_no_queue.json");
+    const GAMEFLOW_DELETED: &str = include_str!("../tests/fixtures/gameflow_session_deleted.json");
 
     struct MockSource {
         responses: HashMap<&'static str, Value>,
@@ -642,6 +796,7 @@ mod tests {
                 (SUMMONER_URI, summoner),
                 (RANKED_STATS_URI, ranked_stats),
                 (MATCH_HISTORY_URI, fixture(MATCHES)),
+                (GAMEFLOW_SESSION_URI, fixture(GAMEFLOW_LOBBY_SOLO)),
             ]);
             Self {
                 responses,
@@ -656,6 +811,11 @@ mod tests {
                 summoner_checks_left: Mutex::new(0),
                 events: Vec::new(),
             }
+        }
+
+        fn without(mut self, uri: &'static str) -> Self {
+            self.responses.remove(uri);
+            self
         }
 
         fn with_events(mut self, events: Vec<EventData>) -> Self {
@@ -827,7 +987,7 @@ mod tests {
 
         let messages = run_cycle(&mut source, &new_state()).await;
 
-        assert_eq!(messages.len(), 3);
+        assert_eq!(messages.len(), 5);
         assert_eq!(messages[0], message_json(&summoner_message(SUMMONER)));
         assert_eq!(messages[1]["type"], "ranked");
         assert_eq!(
@@ -835,6 +995,182 @@ mod tests {
             json!({"wins": 0, "losses": 0})
         );
         assert_eq!(messages[2]["type"], "matches");
+        assert_eq!(
+            messages[3],
+            json!({"type": "phase", "data": {"label": "In Lobby", "queue": "Ranked Solo/Duo"}})
+        );
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn disconnect_publishes_hidden_phase() {
+        let mut source = MockSource::running(fixture(SUMMONER), fixture(RANKED_STATS), 3);
+
+        let messages = run_cycle(&mut source, &new_state()).await;
+
+        assert_eq!(messages.last(), Some(&fixture(E2E_PHASE_NONE)));
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn initial_sync_without_gameflow_session_hides_phase() {
+        let mut source = MockSource::running(fixture(SUMMONER), fixture(RANKED_STATS), 3)
+            .without(GAMEFLOW_SESSION_URI);
+
+        let messages = run_cycle(&mut source, &new_state()).await;
+
+        assert_eq!(messages[3], fixture(E2E_PHASE_NONE));
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn gameflow_event_publishes_phase() {
+        let phase_event = event(GAMEFLOW_SESSION_URI, fixture(GAMEFLOW_MATCHMAKING_SOLO));
+        let mut source = MockSource::running(fixture(SUMMONER), fixture(RANKED_STATS), 3)
+            .with_events(vec![phase_event]);
+
+        let messages = run_cycle(&mut source, &new_state()).await;
+
+        assert_eq!(messages.len(), 6);
+        assert_eq!(messages[4], fixture(E2E_PHASE_IN_QUEUE));
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn deleted_gameflow_session_hides_phase() {
+        let delete = EventData {
+            data: Value::Null,
+            event_type: "Delete".to_string(),
+            uri: GAMEFLOW_SESSION_URI.to_string(),
+        };
+        let mut source = MockSource::running(fixture(SUMMONER), fixture(RANKED_STATS), 3)
+            .with_events(vec![delete]);
+
+        let messages = run_cycle(&mut source, &new_state()).await;
+
+        assert_eq!(messages[4], fixture(E2E_PHASE_NONE));
+    }
+
+    fn phase_from(text: &str) -> Option<GamePhase> {
+        let session = parse::<Option<LcuGameflowSession>>(&fixture(text), GAMEFLOW_SESSION_URI)
+            .expect("gameflow fixture parses");
+        game_phase(session)
+    }
+
+    fn phase(label: &str, queue: Option<&str>) -> Option<GamePhase> {
+        Some(GamePhase {
+            label: PhaseLabel(label.to_string()),
+            queue: queue.map(|name| QueueName(name.to_string())),
+        })
+    }
+
+    #[test]
+    fn lobby_shows_the_queue() {
+        assert_eq!(
+            phase_from(GAMEFLOW_LOBBY_SOLO),
+            phase("In Lobby", Some("Ranked Solo/Duo"))
+        );
+    }
+
+    #[test]
+    fn matchmaking_is_in_queue() {
+        assert_eq!(
+            phase_from(GAMEFLOW_MATCHMAKING_SOLO),
+            phase("In Queue", Some("Ranked Solo/Duo"))
+        );
+    }
+
+    #[test]
+    fn champ_select_shows_the_flex_queue() {
+        assert_eq!(
+            phase_from(GAMEFLOW_CHAMP_SELECT_FLEX),
+            phase("Champ Select", Some("Ranked Flex"))
+        );
+    }
+
+    #[test]
+    fn in_progress_aram_is_in_game() {
+        assert_eq!(
+            phase_from(GAMEFLOW_IN_PROGRESS_ARAM),
+            phase("In Game", Some("ARAM"))
+        );
+    }
+
+    #[test]
+    fn none_phase_is_hidden() {
+        assert_eq!(phase_from(GAMEFLOW_NONE), None);
+    }
+
+    #[test]
+    fn deleted_session_is_hidden() {
+        assert_eq!(phase_from(GAMEFLOW_DELETED), None);
+    }
+
+    #[test]
+    fn unknown_phase_shows_the_raw_value() {
+        assert_eq!(
+            phase_from(GAMEFLOW_UNKNOWN_PHASE),
+            phase("TerminatedInError", Some("Ranked Solo/Duo"))
+        );
+    }
+
+    #[test]
+    fn session_without_queue_shows_only_the_label() {
+        assert_eq!(phase_from(GAMEFLOW_NO_QUEUE), phase("In Lobby", None));
+    }
+
+    #[test]
+    fn queue_without_description_uses_the_name() {
+        let mut session = fixture(GAMEFLOW_LOBBY_SOLO);
+        session["gameData"]["queue"]["description"] = json!("");
+        session["gameData"]["queue"]["name"] = json!("Ranked Solo 5v5");
+
+        let session = parse::<Option<LcuGameflowSession>>(&session, GAMEFLOW_SESSION_URI)
+            .expect("gameflow session parses");
+
+        assert_eq!(
+            game_phase(session),
+            phase("In Lobby", Some("Ranked Solo 5v5"))
+        );
+    }
+
+    #[test]
+    fn queue_with_id_zero_is_omitted() {
+        let mut session = fixture(GAMEFLOW_LOBBY_SOLO);
+        session["gameData"]["queue"]["id"] = json!(0);
+
+        let session = parse::<Option<LcuGameflowSession>>(&session, GAMEFLOW_SESSION_URI)
+            .expect("gameflow session parses");
+
+        assert_eq!(game_phase(session), phase("In Lobby", None));
+    }
+
+    #[test]
+    fn each_phase_has_its_label() {
+        let labels = [
+            ("ReadyCheck", "Match Found"),
+            ("GameStart", "Loading"),
+            ("Reconnect", "Reconnect"),
+            ("WaitingForStats", "Post Game"),
+            ("PreEndOfGame", "Post Game"),
+            ("EndOfGame", "Post Game"),
+        ];
+
+        for (raw, label) in labels {
+            let phase = GameflowPhase::from(raw.to_string());
+            assert_eq!(phase.label(), Some(PhaseLabel(label.to_string())), "{raw}");
+        }
+    }
+
+    #[test]
+    fn phase_messages_match_e2e_fixtures() {
+        let cases = [
+            (GAMEFLOW_MATCHMAKING_SOLO, E2E_PHASE_IN_QUEUE),
+            (GAMEFLOW_CHAMP_SELECT_FLEX, E2E_PHASE_CHAMP_SELECT),
+            (GAMEFLOW_NO_QUEUE, E2E_PHASE_LABEL_ONLY),
+            (GAMEFLOW_NONE, E2E_PHASE_NONE),
+        ];
+
+        for (lcu, e2e) in cases {
+            let message = OverlayMessage::Phase(phase_from(lcu));
+            assert_eq!(message_json(&message), fixture(e2e));
+        }
     }
 
     #[tokio::test(start_paused = true)]
@@ -850,7 +1186,8 @@ mod tests {
             .iter()
             .map(|msg| serde_json::from_str(msg).expect("snapshot is valid JSON"))
             .collect();
-        assert_eq!(snapshot, messages);
+        let latest_per_type = [&messages[0], &messages[1], &messages[2], &messages[4]];
+        assert_eq!(snapshot.iter().collect::<Vec<_>>(), latest_per_type);
     }
 
     #[tokio::test(start_paused = true)]
@@ -1340,17 +1677,17 @@ mod tests {
 
         let messages = run_cycle(&mut source, &new_state()).await;
 
-        assert_eq!(messages.len(), 5);
+        assert_eq!(messages.len(), 7);
         assert_eq!(
-            messages[3]["data"]["session"],
+            messages[4]["data"]["session"],
             json!({"wins": 2, "losses": 1})
         );
         assert_eq!(
-            messages[3]["data"]["lpChange"],
+            messages[4]["data"]["lpChange"],
             json!({"lastGame": 0, "sessionTotal": 0})
         );
-        assert_eq!(messages[4], messages[2]);
-        assert_eq!(messages[4]["type"], "matches");
+        assert_eq!(messages[5], messages[2]);
+        assert_eq!(messages[5]["type"], "matches");
     }
 
     #[tokio::test(start_paused = true)]
@@ -1361,8 +1698,8 @@ mod tests {
 
         let messages = run_cycle(&mut source, &new_state()).await;
 
-        assert_eq!(messages.len(), 4);
-        assert_eq!(messages[3], messages[0]);
-        assert_eq!(messages[3]["type"], "summoner");
+        assert_eq!(messages.len(), 6);
+        assert_eq!(messages[4], messages[0]);
+        assert_eq!(messages[4]["type"], "summoner");
     }
 }

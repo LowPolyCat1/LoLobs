@@ -7,6 +7,7 @@ struct Snapshot {
     summoner: Option<String>,
     ranked: Option<String>,
     matches: Option<String>,
+    phase: Option<String>,
 }
 
 impl Snapshot {
@@ -19,11 +20,12 @@ impl Snapshot {
             OverlayMessage::Summoner(_) => &mut self.summoner,
             OverlayMessage::Ranked(_) => &mut self.ranked,
             OverlayMessage::Matches(_) => &mut self.matches,
+            OverlayMessage::Phase(_) => &mut self.phase,
         }
     }
 
     fn messages(&self) -> Vec<String> {
-        [&self.summoner, &self.ranked, &self.matches]
+        [&self.summoner, &self.ranked, &self.matches, &self.phase]
             .into_iter()
             .flatten()
             .cloned()
@@ -112,6 +114,10 @@ pub mod test_messages {
         })
     }
 
+    pub fn hidden_phase() -> OverlayMessage {
+        OverlayMessage::Phase(None)
+    }
+
     pub fn json(message: &OverlayMessage) -> String {
         serde_json::to_string(message).expect("message serializes")
     }
@@ -123,12 +129,13 @@ pub mod test_messages {
 
 #[cfg(test)]
 mod tests {
-    use super::test_messages::{json, matches, publish, ranked, summoner};
+    use super::test_messages::{hidden_phase, json, matches, publish, ranked, summoner};
     use super::*;
 
     #[test]
     fn new_client_receives_full_snapshot_in_order() {
         let outbox = Outbox::new(8);
+        publish(&outbox, &hidden_phase());
         publish(&outbox, &matches());
         publish(&outbox, &ranked(10));
         publish(&outbox, &summoner("PlayerOne"));
@@ -140,7 +147,8 @@ mod tests {
             [
                 json(&summoner("PlayerOne")),
                 json(&ranked(10)),
-                json(&matches())
+                json(&matches()),
+                json(&hidden_phase())
             ]
         );
     }
