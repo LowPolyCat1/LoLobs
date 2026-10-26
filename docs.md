@@ -57,7 +57,7 @@ When `persist_session` is `false`, the server does not read or write `session.js
 
 Each message is one JSON text with two fields:
 
-* `type`: The message type. The value is `summoner`, `ranked` or `matches`.
+* `type`: The message type. The value is `summoner`, `ranked`, `matches` or `phase`.
 * `data`: The data of the message. The structure of `data` changes with `type`.
 
 ```json
@@ -69,7 +69,8 @@ The server reads the data from the League Client (LCU API). It sends only the fi
 ## When the Server Sends Messages
 
 * When the League Client connects, the server sends one message of each type.
-* When the League Client changes the summoner, ranked stats or match history, the server sends a new message of that type.
+* When the League Client changes the summoner, ranked stats, match history or gameflow session, the server sends a new message of that type.
+* When the League Client disconnects, the server sends a `phase` message with `null` data.
 * When the ranked stats change, the server also sends a new `matches` message.
 * When a page connects, the server sends the last message of each type that it has.
 * When a page cannot read the messages fast enough, the server sends the last message of each type again.
@@ -181,6 +182,56 @@ The `match_limit` value does not change the streak. The server ignores remakes, 
 
 ---
 
+## 4. `phase`
+
+This message gives the phase of the League Client and the queue of the phase.
+
+The server reads the phase from `/lol-gameflow/v1/session`. The server makes the label text. The overlay page only shows it.
+
+| Field | Type | Description |
+| --- | --- | --- |
+| `label` | string | The text for the phase, for example `In Queue`. |
+| `queue` | string | The name of the queue, for example `Ranked Solo/Duo`. The field is not present when the League Client has no queue for the phase. |
+
+The server uses these labels:
+
+| Phase of the League Client | `label` |
+| --- | --- |
+| `Lobby` | `In Lobby` |
+| `Matchmaking` | `In Queue` |
+| `ReadyCheck` | `Match Found` |
+| `ChampSelect` | `Champ Select` |
+| `GameStart` | `Loading` |
+| `InProgress` | `In Game` |
+| `Reconnect` | `Reconnect` |
+| `WaitingForStats`, `PreEndOfGame`, `EndOfGame` | `Post Game` |
+| Other value | The value of the League Client, for example `TerminatedInError`. |
+
+The server reads `queue` from the `description` field of the queue. When `description` is empty, the server uses the `name` field.
+When the queue ID is `-1` or `0`, or both fields are empty, `queue` is not present.
+
+`data` is `null` in these conditions:
+
+* The phase is `None`.
+* The League Client has no gameflow session.
+* The League Client disconnects.
+
+```json
+{
+  "type": "phase",
+  "data": {
+    "label": "In Queue",
+    "queue": "Ranked Solo/Duo"
+  }
+}
+```
+
+```json
+{ "type": "phase", "data": null }
+```
+
+---
+
 ## Overlay Pages
 
 The script `web/overlay.js` reads the `type` field of each message and updates the page:
@@ -193,6 +244,7 @@ The script `web/overlay.js` reads the `type` field of each message and updates t
 3. `matches`: The script shows one champion icon for each game. The border color of the icon shows the result.
    To show fewer games, add the `matches` parameter to the page URL, for example `past_matches.html?matches=3`.
    The script also shows the streak, for example `3W streak` in green or `2L streak` in red. When `streak` is `null`, the script hides it.
+4. `phase`: `phase.html` shows the label and the queue, for example `In Queue · Ranked Solo/Duo`. When `queue` is not present, the page shows only the label.
 
 The script ignores messages with an unknown `type`.
 
@@ -202,6 +254,11 @@ When you open the page as a local file, the script connects to `ws://127.0.0.1:2
 ### Visual States
 
 When the script receives a known message, it adds the `.visible` CSS class to the `.overlay-card` elements. This class starts the entry animation.
+
+The `#phase-card` element of `phase.html` is different. Only `phase` messages change it:
+
+* When `data` is not `null`, the script adds the `.visible` class.
+* When `data` is `null`, the script removes the `.visible` class. The card fades out.
 
 When the rank goes up or down, the script adds a CSS class to `#rank-icon`. This class starts a short animation of the emblem:
 
