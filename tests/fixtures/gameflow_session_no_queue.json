@@ -1,0 +1,46 @@
+{
+  "gameClient": {
+    "observerServerIp": "",
+    "observerServerPort": 0,
+    "running": false,
+    "serverIp": "",
+    "serverPort": 0,
+    "visible": false
+  },
+  "gameData": {
+    "gameId": 0,
+    "gameName": "",
+    "isCustomGame": false,
+    "password": "",
+    "playerChampionSelections": [],
+    "spectatorsAllowed": false,
+    "teamOne": [],
+    "teamTwo": []
+  },
+  "gameDodge": {
+    "dodgeIds": [],
+    "phase": "None",
+    "state": "Invalid"
+  },
+  "map": {
+    "assets": {},
+    "categorizedContentBundles": {},
+    "description": "",
+    "gameMode": "CLASSIC",
+    "gameModeName": "",
+    "gameModeShortName": "",
+    "gameMutator": "",
+    "id": 11,
+    "isRGM": false,
+    "mapStringId": "",
+    "name": "",
+    "perPositionDisallowedSummonerSpells": {},
+    "perPositionRequiredSummonerSpells": {},
+    "platformId": "",
+    "platformName": "",
+    "properties": {
+      "suppressRunesMasteriesPerks": false
+    }
+  },
+  "phase": "Lobby"
+}

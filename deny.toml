@@ -1,0 +1,12 @@
+[advisories]
+# These crates are build dependencies of irelia 0.11.2, the latest release.
+# Its build script uses them only to read one Riot root certificate that is part of the crate.
+# Issue #35 tracks the removal of these entries.
+ignore = [
+    { id = "RUSTSEC-2026-0049", reason = "rustls-webpki 0.102 in the irelia build script, see issue #35" },
+    { id = "RUSTSEC-2026-0098", reason = "rustls-webpki 0.102 in the irelia build script, see issue #35" },
+    { id = "RUSTSEC-2026-0099", reason = "rustls-webpki 0.102 in the irelia build script, see issue #35" },
+    { id = "RUSTSEC-2026-0104", reason = "rustls-webpki 0.102 in the irelia build script, see issue #35" },
+    { id = "RUSTSEC-2026-0382", reason = "rustls-webpki 0.102 in the irelia build script, see issue #35" },
+    { id = "RUSTSEC-2025-0134", reason = "rustls-pemfile is unmaintained, used in the irelia build script, see issue #35" },
+]

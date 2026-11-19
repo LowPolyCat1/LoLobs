@@ -1,0 +1,105 @@
+{
+  "gameClient": {
+    "observerServerIp": "",
+    "observerServerPort": 0,
+    "running": false,
+    "serverIp": "",
+    "serverPort": 0,
+    "visible": false
+  },
+  "gameData": {
+    "gameId": 0,
+    "gameName": "",
+    "isCustomGame": false,
+    "password": "",
+    "playerChampionSelections": [],
+    "queue": {
+      "allowablePremadeSizes": [
+        1,
+        2
+      ],
+      "areFreeChampionsAllowed": false,
+      "assetMutator": "",
+      "category": "PvP",
+      "championsRequiredToPlay": 20,
+      "description": "Ranked Solo/Duo",
+      "detailedDescription": "",
+      "gameMode": "CLASSIC",
+      "gameTypeConfig": {
+        "advancedLearningQuests": false,
+        "allowTrades": true,
+        "banMode": "StandardBanStrategy",
+        "banTimerDuration": 30,
+        "battleBoost": false,
+        "crossTeamChampionPool": false,
+        "deathMatch": false,
+        "doNotRemove": false,
+        "duplicatePick": false,
+        "exclusivePick": true,
+        "id": 18,
+        "learningQuests": false,
+        "mainPickTimerDuration": 30,
+        "maxAllowableBans": 10,
+        "name": "GAME_CFG_DRAFT_RANKED",
+        "onboardCoopBeginner": false,
+        "pickMode": "SimulPickStrategy",
+        "postPickTimerDuration": 30,
+        "reroll": false,
+        "teamChampionPool": false
+      },
+      "id": 420,
+      "isRanked": true,
+      "isTeamBuilderManaged": true,
+      "lastToggledOffTime": 0,
+      "lastToggledOnTime": 0,
+      "mapId": 11,
+      "maximumParticipantListSize": 2,
+      "minLevel": 30,
+      "minimumParticipantListSize": 1,
+      "name": "Ranked Solo/Duo",
+      "numPlayersPerTeam": 5,
+      "queueAvailability": "Available",
+      "queueRewards": {
+        "isChampionPointsEnabled": true,
+        "isIpEnabled": true,
+        "isXpEnabled": true,
+        "partySizeIpRewards": []
+      },
+      "removalFromGameAllowed": false,
+      "removalFromGameDelayMinutes": 0,
+      "shortName": "Solo/Duo",
+      "showPositionSelector": true,
+      "spectatorEnabled": true,
+      "type": "RANKED_SOLO_5x5"
+    },
+    "spectatorsAllowed": false,
+    "teamOne": [],
+    "teamTwo": []
+  },
+  "gameDodge": {
+    "dodgeIds": [],
+    "phase": "None",
+    "state": "Invalid"
+  },
+  "map": {
+    "assets": {},
+    "categorizedContentBundles": {},
+    "description": "",
+    "gameMode": "CLASSIC",
+    "gameModeName": "",
+    "gameModeShortName": "",
+    "gameMutator": "",
+    "id": 11,
+    "isRGM": false,
+    "mapStringId": "",
+    "name": "",
+    "perPositionDisallowedSummonerSpells": {},
+    "perPositionRequiredSummonerSpells": {},
+    "platformId": "",
+    "platformName": "",
+    "properties": {
+      "suppressRunesMasteriesPerks": false
+    }
+  },
+  "phase": "Lobby"
+}

@@ -1,0 +1,108 @@
+{
+  "gameClient": {
+    "observerServerIp": "",
+    "observerServerPort": 0,
+    "running": true,
+    "serverIp": "",
+    "serverPort": 0,
+    "visible": true
+  },
+  "gameData": {
+    "gameId": 7134519940,
+    "gameName": "",
+    "isCustomGame": false,
+    "password": "",
+    "playerChampionSelections": [],
+    "queue": {
+      "allowablePremadeSizes": [
+        1,
+        2,
+        3,
+        4,
+        5
+      ],
+      "areFreeChampionsAllowed": true,
+      "assetMutator": "",
+      "category": "PvP",
+      "championsRequiredToPlay": 0,
+      "description": "ARAM",
+      "detailedDescription": "",
+      "gameMode": "ARAM",
+      "gameTypeConfig": {
+        "advancedLearningQuests": false,
+        "allowTrades": true,
+        "banMode": "SkipBanStrategy",
+        "banTimerDuration": 0,
+        "battleBoost": false,
+        "crossTeamChampionPool": false,
+        "deathMatch": false,
+        "doNotRemove": false,
+        "duplicatePick": false,
+        "exclusivePick": true,
+        "id": 21,
+        "learningQuests": false,
+        "mainPickTimerDuration": 30,
+        "maxAllowableBans": 0,
+        "name": "GAME_CFG_PICK_RANDOM",
+        "onboardCoopBeginner": false,
+        "pickMode": "SimulPickStrategy",
+        "postPickTimerDuration": 30,
+        "reroll": true,
+        "teamChampionPool": false
+      },
+      "id": 450,
+      "isRanked": false,
+      "isTeamBuilderManaged": false,
+      "lastToggledOffTime": 0,
+      "lastToggledOnTime": 0,
+      "mapId": 12,
+      "maximumParticipantListSize": 5,
+      "minLevel": 0,
+      "minimumParticipantListSize": 1,
+      "name": "ARAM",
+      "numPlayersPerTeam": 5,
+      "queueAvailability": "Available",
+      "queueRewards": {
+        "isChampionPointsEnabled": true,
+        "isIpEnabled": true,
+        "isXpEnabled": true,
+        "partySizeIpRewards": []
+      },
+      "removalFromGameAllowed": false,
+      "removalFromGameDelayMinutes": 0,
+      "shortName": "ARAM",
+      "showPositionSelector": false,
+      "spectatorEnabled": true,
+      "type": "ARAM_UNRANKED_5x5"
+    },
+    "spectatorsAllowed": false,
+    "teamOne": [],
+    "teamTwo": []
+  },
+  "gameDodge": {
+    "dodgeIds": [],
+    "phase": "None",
+    "state": "Invalid"
+  },
+  "map": {
+    "assets": {},
+    "categorizedContentBundles": {},
+    "description": "",
+    "gameMode": "ARAM",
+    "gameModeName": "",
+    "gameModeShortName": "",
+    "gameMutator": "",
+    "id": 12,
+    "isRGM": false,
+    "mapStringId": "",
+    "name": "",
+    "perPositionDisallowedSummonerSpells": {},
+    "perPositionRequiredSummonerSpells": {},
+    "platformId": "",
+    "platformName": "",
+    "properties": {
+      "suppressRunesMasteriesPerks": false
+    }
+  },
+  "phase": "InProgress"
+}

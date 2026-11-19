@@ -1,0 +1,28 @@
+name: release
+
+on:
+  push:
+    tags: ["v*"]
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v5
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+      - run: cargo build --release
+      - name: Package
+        shell: pwsh
+        run: |
+          New-Item -ItemType Directory -Path package | Out-Null
+          Copy-Item target/release/LoLobs.exe package/
+          Copy-Item -Recurse web package/web
+          Copy-Item config.example.toml package/
+          Compress-Archive -Path package/* -DestinationPath "LoLobs-${{ github.ref_name }}-windows.zip"
+      - uses: softprops/action-gh-release@v2
+        with:
+          files: LoLobs-${{ github.ref_name }}-windows.zip
